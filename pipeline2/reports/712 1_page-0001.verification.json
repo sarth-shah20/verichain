@@ -1,0 +1,74 @@
+{
+  "report_type": "verification",
+  "generated_at": "2026-06-29T07:07:03.550347+00:00",
+  "document": {
+    "doc_type": "unknown",
+    "label": "Unknown Document",
+    "source_path": "/Users/arpit/Downloads/testing doc/712/712 1_page-0001.jpg"
+  },
+  "extraction": {
+    "fields": {
+      "name": "Dhanashri Manojrao Chamat, Dhanit Ranjaji Thavkar, Om Dhanit Thavkar",
+      "document_title": "Village Form 7 (Record of Rights) and Village Form 12 (Register of Crops)",
+      "key_identifiers": "PU-ID: 18235480894, Survey Number: 63, Village Code: 542006, Report Date: 2024-05-02, Last Mutation Number: 1223",
+      "amounts": "100000"
+    },
+    "normalization_notes": [
+      "Translated Marathi document title, names, and identifiers to English",
+      "Converted report date 02/05/2024 to 2024-05-02",
+      "Extracted numeric amount 100000 from 'रु. १०००००/-'"
+    ],
+    "extraction_observations": [
+      "Document is heavily watermarked with 'VIEW ONLY - NOT FOR LEGAL PURPOSE'",
+      "Document is a Maharashtra State 7/12 land extract (Satbara Utara)"
+    ],
+    "unreadable_fields": [],
+    "extraction_confidence": 0.92
+  },
+  "database": {
+    "found": false,
+    "source": null,
+    "record": {},
+    "as_of": null
+  },
+  "verification": {
+    "match_status": "unverified",
+    "db_record_present": false,
+    "field_results": [
+      {
+        "field": "name",
+        "document_value": "Dhanashri Manojrao Chamat, Dhanit Ranjaji Thavkar, Om Dhanit Thavkar",
+        "database_value": null,
+        "match": null,
+        "note": "No authoritative record on file to compare against."
+      },
+      {
+        "field": "document_title",
+        "document_value": "Village Form 7 (Record of Rights) and Village Form 12 (Register of Crops)",
+        "database_value": null,
+        "match": null,
+        "note": "No authoritative record on file to compare against."
+      },
+      {
+        "field": "key_identifiers",
+        "document_value": "PU-ID: 18235480894, Survey Number: 63, Village Code: 542006, Report Date: 2024-05-02, Last Mutation Number: 1223",
+        "database_value": null,
+        "match": null,
+        "note": "No authoritative record on file to compare against."
+      },
+      {
+        "field": "amounts",
+        "document_value": "100000",
+        "database_value": null,
+        "match": null,
+        "note": "No authoritative record on file to compare against."
+      }
+    ],
+    "discrepancies": [],
+    "verification_confidence": null,
+    "summary": "Unknown Document could not be verified -- no matching record in the bank's database of record. Treat as unverified (not a forgery signal on its own); rely on forensics / cross-document checks.",
+    "_db_found": false,
+    "_verified_at": "2026-06-29T07:07:03.550342+00:00"
+  },
+  "summary_text": "Document   : Unknown Document (unknown)\nSource file: 712 1_page-0001.jpg\nDB record  : NOT FOUND (unverified)\nVerdict    : UNVERIFIED  (confidence None)\nSummary    : Unknown Document could not be verified -- no matching record in the bank's database of record. Treat as unverified (not a forgery signal on its own); rely on forensics / cross-document checks.\nDiscrepancies: none"
+}

@@ -1,0 +1,8 @@
+OVERALL RISK SCORE : 72/100  (HIGH)
+RECOMMENDATION     : MANUAL_REVIEW
+
+Top flags:
+  - [HIGH] (verification) ITR income mismatch vs DB-of-record (+5.9%)
+  - [HIGH] (forensics) ELA indicates edited region near income field
+
+Rationale: Independent content and forensic signals both point to the income figure being altered.

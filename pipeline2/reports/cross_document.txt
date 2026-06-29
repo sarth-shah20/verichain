@@ -1,0 +1,5 @@
+Cross-document check over 2 documents: INCONSISTENT
+Documents: Salaried ITR, Address Proof
+Conflicts:
+  - [MEDIUM] address (payslip, address_proof): MG Road, Bengaluru vs Whitefield, Bengaluru
+Consistent: name, pan

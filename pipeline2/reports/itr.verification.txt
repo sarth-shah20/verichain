@@ -1,0 +1,7 @@
+Document   : Salaried ITR (salaried_itr)
+Source file: itr.png
+DB record  : found
+Verdict    : PARTIAL_MATCH  (confidence 0.88)
+Summary    : 
+Discrepancies:
+  - [HIGH] gross_total_income: Stated income exceeds DB-of-record by 5.9%

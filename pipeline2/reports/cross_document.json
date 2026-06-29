@@ -1,0 +1,33 @@
+{
+  "report_type": "cross_document_discrepancy",
+  "generated_at": "2026-06-27T18:02:58.680943+00:00",
+  "document_count": 2,
+  "documents": [
+    "Salaried ITR",
+    "Address Proof"
+  ],
+  "cross_document": {
+    "entity_consistency": "inconsistent",
+    "discrepancies": [
+      {
+        "attribute": "address",
+        "documents": [
+          "payslip",
+          "address_proof"
+        ],
+        "values": [
+          "MG Road, Bengaluru",
+          "Whitefield, Bengaluru"
+        ],
+        "severity": "medium",
+        "detail": "Address differs across two submitted documents"
+      }
+    ],
+    "consistent_attributes": [
+      "name",
+      "pan"
+    ],
+    "summary": "Name and PAN agree across documents; residential address conflicts."
+  },
+  "summary_text": "Cross-document check over 2 documents: INCONSISTENT\nDocuments: Salaried ITR, Address Proof\nConflicts:\n  - [MEDIUM] address (payslip, address_proof): MG Road, Bengaluru vs Whitefield, Bengaluru\nConsistent: name, pan"
+}

@@ -1,0 +1,180 @@
+"""
+Fusion / holistic report.
+
+Merges the two pipeline outputs into one underwriting verdict:
+  - the VERIFICATION report  (Pipeline 2: content extraction + DB check)
+  - the FORENSICS report     (Pipeline 1: authenticity & image/file forensics)
+
+Optionally also folds in:
+  - a cross-document discrepancy report (discrepancy.py)
+  - flag history (past false flags) so we don't repeatedly penalise benign quirks
+
+Output: a holistic report with an overall risk score (0-100), a risk band, a
+decision recommendation, and the specific flagged evidence behind the score.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from typing import Any
+
+import llm_client
+import utils
+
+_FUSION_SYSTEM = """You are the senior risk-fusion engine for a bank's loan
+underwriting. MOCK_TASK=fusion
+
+You receive independent reports about the SAME application:
+- a content-verification report (does the document's data match the bank's
+  records?),
+- a forensics report (is the document file/image authentic, or edited/AI-made?),
+- optionally a cross-document consistency report,
+- optionally a flag-history list of previously confirmed FALSE flags.
+
+Produce ONE holistic risk assessment.
+
+Scoring guidance (0 = clean, 100 = almost certainly fraudulent):
+- Corroboration matters: when BOTH content and forensics flag the SAME field,
+  raise the score sharply (strong signal of deliberate tampering).
+- A high-severity content mismatch OR clear forensic editing alone is serious.
+- "unverified" (no DB record) is uncertainty, not proof of fraud -> moderate.
+- If a flag matches a known prior FALSE flag, down-weight it and note the
+  adjustment.
+Bands: 0-29 low, 30-59 medium, 60-100 high.
+Recommendations: "approve" | "manual_review" | "decline".
+
+Return STRICT JSON only. Cite concrete evidence from the inputs -- do not invent."""
+
+
+def _slim_verification(v: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "document": v.get("document", {}),
+        "match_status": v.get("verification", {}).get("match_status"),
+        "discrepancies": v.get("verification", {}).get("discrepancies", []),
+        "extraction_observations": v.get("extraction", {}).get("extraction_observations", []),
+        "db_found": v.get("database", {}).get("found"),
+    }
+
+
+def _build_user_prompt(
+    verification: dict[str, Any] | list[dict[str, Any]],
+    forensics: dict[str, Any],
+    cross_doc: dict[str, Any] | None,
+    flag_history: list[dict[str, Any]] | None,
+) -> str:
+    if isinstance(verification, list):
+        ver_payload = [_slim_verification(v) for v in verification]
+    else:
+        ver_payload = _slim_verification(verification)
+
+    parts = [
+        "VERIFICATION REPORT(S):",
+        json.dumps(ver_payload, indent=2, ensure_ascii=False),
+        "",
+        "FORENSICS REPORT:",
+        json.dumps(forensics, indent=2, ensure_ascii=False),
+    ]
+    if cross_doc is not None:
+        parts += ["", "CROSS-DOCUMENT REPORT:", json.dumps(cross_doc.get("cross_document", cross_doc), indent=2, ensure_ascii=False)]
+    if flag_history:
+        parts += ["", "FLAG HISTORY (known prior FALSE flags):", json.dumps(flag_history, indent=2, ensure_ascii=False)]
+
+    parts += [
+        "",
+        """Return JSON with this exact shape:
+{
+  "overall_risk_score": <0-100 integer>,
+  "risk_band": "low" | "medium" | "high",
+  "decision_recommendation": "approve" | "manual_review" | "decline",
+  "top_flags": [
+    { "source": "verification|forensics|cross_document",
+      "evidence": "<concrete finding>",
+      "weight": "low|medium|high" }
+  ],
+  "corroborated_findings": [ "<findings flagged by more than one source>" ],
+  "false_flag_adjustments": [ "<flags down-weighted due to flag history>" ],
+  "rationale": "<2-4 sentence explanation of the score and recommendation>"
+}""",
+    ]
+    return "\n".join(parts)
+
+
+def _readable_summary(report: dict[str, Any]) -> str:
+    h = report["fusion"]
+    lines = [
+        f"OVERALL RISK SCORE : {h.get('overall_risk_score')}/100  ({h.get('risk_band', '?').upper()})",
+        f"RECOMMENDATION     : {h.get('decision_recommendation', 'n/a').upper()}",
+        "",
+        "Top flags:",
+    ]
+    for f in h.get("top_flags", []):
+        lines.append(f"  - [{f.get('weight', '?').upper()}] ({f.get('source')}) {f.get('evidence')}")
+    if h.get("corroborated_findings"):
+        lines.append("Corroborated by multiple sources:")
+        for c in h["corroborated_findings"]:
+            lines.append(f"  - {c}")
+    if h.get("false_flag_adjustments"):
+        lines.append("Down-weighted (prior false flags):")
+        for a in h["false_flag_adjustments"]:
+            lines.append(f"  - {a}")
+    lines += ["", f"Rationale: {h.get('rationale', '')}"]
+    return "\n".join(lines)
+
+
+def fuse_reports(
+    verification: dict[str, Any] | list[dict[str, Any]],
+    forensics: dict[str, Any],
+    cross_doc: dict[str, Any] | None = None,
+    flag_history: list[dict[str, Any]] | None = None,
+    out_path: str | None = None,
+) -> dict[str, Any]:
+    """
+    Merge verification + forensics (+ optional cross-doc + flag history) into a
+    holistic risk report.
+
+    Args:
+        verification: one verification report or a list of them.
+        forensics: the Pipeline 1 forensics report (any JSON structure).
+        cross_doc: optional cross-document discrepancy report.
+        flag_history: optional list of known prior false flags.
+        out_path: optional path to write the holistic JSON.
+    """
+    fusion = llm_client.call_text(
+        _FUSION_SYSTEM,
+        _build_user_prompt(verification, forensics, cross_doc, flag_history),
+        json_mode=True,
+    )
+
+    report: dict[str, Any] = {
+        "report_type": "holistic_risk",
+        "generated_at": utils.now_iso(),
+        "inputs": {
+            "verification_reports": len(verification) if isinstance(verification, list) else 1,
+            "forensics_report": True,
+            "cross_document_report": cross_doc is not None,
+            "flag_history_entries": len(flag_history) if flag_history else 0,
+        },
+        "fusion": fusion,
+    }
+    report["summary_text"] = _readable_summary(report)
+
+    if out_path:
+        utils.save_json(report, out_path)
+        with open(os.path.splitext(out_path)[0] + ".txt", "w", encoding="utf-8") as fh:
+            fh.write(report["summary_text"])
+    return report
+
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) < 3:
+        print("usage: python fusion.py <verification.json> <forensics.json> [cross_doc.json] [flag_history.json]")
+        raise SystemExit(1)
+    ver = utils.load_json(sys.argv[1])
+    fore = utils.load_json(sys.argv[2])
+    cross = utils.load_json(sys.argv[3]) if len(sys.argv) > 3 else None
+    flags = utils.load_json(sys.argv[4]) if len(sys.argv) > 4 else None
+    rep = fuse_reports(ver, fore, cross, flags, "reports/holistic.json")
+    print(rep["summary_text"])

@@ -1,0 +1,7 @@
+# Core
+litellm>=1.40.0          # unified LLM client (routes to Vertex AI)
+google-cloud-aiplatform  # Vertex AI backend used by litellm
+
+# Optional but recommended
+pymupdf>=1.24.0          # rasterise PDF pages to images (utils.load_media)
+python-dotenv>=1.0.0     # load env vars from a .env file (optional)

@@ -1,0 +1,6 @@
+Document   : Unknown Document (unknown)
+Source file: 712 1_page-0001.jpg
+DB record  : NOT FOUND (unverified)
+Verdict    : UNVERIFIED  (confidence None)
+Summary    : Unknown Document could not be verified -- no matching record in the bank's database of record. Treat as unverified (not a forgery signal on its own); rely on forensics / cross-document checks.
+Discrepancies: none

@@ -1,0 +1,70 @@
+{
+  "report_type": "verification",
+  "generated_at": "2026-06-27T18:02:58.679324+00:00",
+  "document": {
+    "doc_type": "salaried_itr",
+    "label": "Salaried ITR",
+    "source_path": "samples/itr.png"
+  },
+  "extraction": {
+    "fields": {
+      "pan": "ABCDE1234F",
+      "name": "RAHUL KUMAR SHARMA",
+      "assessment_year": "2024-25",
+      "gross_total_income": 1250000,
+      "total_tax_paid": 145000,
+      "employer_name": "ACME TECHNOLOGIES PVT LTD"
+    },
+    "normalization_notes": [
+      "Translated regional-language label 'naam' -> 'name'",
+      "Expanded 'A.Y.' -> 'assessment_year'"
+    ],
+    "extraction_observations": [],
+    "unreadable_fields": [],
+    "extraction_confidence": 0.92
+  },
+  "database": {
+    "found": true,
+    "source": "itr",
+    "record": {
+      "pan": "ABCDE1234F",
+      "name": "RAHUL KUMAR SHARMA",
+      "assessment_year": "2024-25",
+      "gross_total_income": 1180000,
+      "total_tax_paid": 138000,
+      "employer_name": "ACME TECHNOLOGIES PVT LTD",
+      "acknowledgement_number": "1029384756120724"
+    },
+    "as_of": null
+  },
+  "verification": {
+    "match_status": "partial_match",
+    "field_results": [
+      {
+        "field": "pan",
+        "document_value": "ABCDE1234F",
+        "database_value": "ABCDE1234F",
+        "match": true,
+        "note": "exact match"
+      },
+      {
+        "field": "gross_total_income",
+        "document_value": 1250000,
+        "database_value": 1180000,
+        "match": false,
+        "note": "Document income higher than filed return by 70,000"
+      }
+    ],
+    "discrepancies": [
+      {
+        "field": "gross_total_income",
+        "severity": "high",
+        "detail": "Stated income exceeds DB-of-record by 5.9%"
+      }
+    ],
+    "verification_confidence": 0.88,
+    "_db_found": true,
+    "_verified_at": "2026-06-27T18:02:58.679322+00:00"
+  },
+  "summary_text": "Document   : Salaried ITR (salaried_itr)\nSource file: itr.png\nDB record  : found\nVerdict    : PARTIAL_MATCH  (confidence 0.88)\nSummary    : \nDiscrepancies:\n  - [HIGH] gross_total_income: Stated income exceeds DB-of-record by 5.9%"
+}

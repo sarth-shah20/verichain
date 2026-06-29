@@ -1,0 +1,30 @@
+{
+  "report_type": "holistic_risk",
+  "generated_at": "2026-06-27T18:02:58.681669+00:00",
+  "inputs": {
+    "verification_reports": 2,
+    "forensics_report": true,
+    "cross_document_report": true,
+    "flag_history_entries": 1
+  },
+  "fusion": {
+    "overall_risk_score": 72,
+    "risk_band": "high",
+    "decision_recommendation": "manual_review",
+    "top_flags": [
+      {
+        "source": "verification",
+        "evidence": "ITR income mismatch vs DB-of-record (+5.9%)",
+        "weight": "high"
+      },
+      {
+        "source": "forensics",
+        "evidence": "ELA indicates edited region near income field",
+        "weight": "high"
+      }
+    ],
+    "rationale": "Independent content and forensic signals both point to the income figure being altered.",
+    "false_flag_adjustments": []
+  },
+  "summary_text": "OVERALL RISK SCORE : 72/100  (HIGH)\nRECOMMENDATION     : MANUAL_REVIEW\n\nTop flags:\n  - [HIGH] (verification) ITR income mismatch vs DB-of-record (+5.9%)\n  - [HIGH] (forensics) ELA indicates edited region near income field\n\nRationale: Independent content and forensic signals both point to the income figure being altered."
+}
