@@ -112,6 +112,88 @@ All integration is built around this. Do not change without informing each other
 }
 ```
 
+> `risk_score` is an **authenticity / confidence** score (higher = more genuine):
+> `>=80` → `auto_approve` (`route_1`), `60-79` → `human_review` (`route_2`),
+> `<60` → `auto_reject` (`route_3`). It is single-document only.
+
+### POST /verify/batch  *(async, multi-document)*
+
+Additive endpoint — the single-doc `POST /verify` schema above is **unchanged**.
+Submits a whole applicant file at once so the backend can run **cross-document**
+checks (e.g. income on the salary slip vs. the ITR) that a per-document call
+cannot. Returns immediately with a `job_id`; processing runs in the background
+and the per-document pipelines run concurrently.
+
+**Request**
+```json
+{
+  "applicant_id": "string | null",
+  "documents": [
+    {
+      "document_type": "itr | salary_slip | land_record | legal_doc | bank_statement",
+      "file_base64": "string",
+      "filename": "string | null",
+      "digilocker_uri": "string | null",
+      "ulpin": "string | null",
+      "has_qr": false
+    }
+  ]
+}
+```
+If `applicant_id` is omitted, the server generates one (`APP-XXXXXX`).
+
+**Response**
+```json
+{ "job_id": "job_abc123" }
+```
+
+### GET /verify/batch/{job_id}
+
+Poll until `status` is `done` or `error`.
+
+**Response**
+```json
+{
+  "job_id": "job_abc123",
+  "status": "processing | done | error",
+  "progress": 0,
+  "applicant_id": "string",
+  "submitted_at": "2026-06-29T10:23:00Z",
+  "document_count": 2,
+  "overall": {
+    "risk_score": 41,
+    "route_taken": "route_3",
+    "decision": "auto_reject",
+    "reasons": ["Income on salary slip does not reconcile with the ITR."]
+  },
+  "documents": [
+    {
+      "filename": "itr.pdf",
+      "document_type": "itr",
+      "risk_score": 95,
+      "route_taken": "route_1",
+      "decision": "auto_approve",
+      "reasons": ["All fields match DB-of-record"],
+      "heatmap_url": "string | null",
+      "field_verification": {
+        "status": "verified | mismatch | unverifiable",
+        "issuer": "CBDT | CERSAI | mock_registry",
+        "matched_fields": ["pan", "gross_total_income"]
+      },
+      "extracted_fields": { "pan": "ABKPG7842M", "gross_total_income": 910000 }
+    }
+  ],
+  "cross_document": [
+    { "label": "income differs across documents", "reason": "...", "severity": "high" }
+  ],
+  "error": null
+}
+```
+Each entry in `documents` reuses the single-doc verdict fields, plus `filename`,
+`document_type` and the raw `extracted_fields`. `cross_document` is populated
+only when two or more documents verify successfully. Job state is held in memory
+for the process lifetime (a polled results page survives reload).
+
 ### GET /verify/{applicant_id}/history
 
 Returns all verification events for an applicant from the blockchain audit log.

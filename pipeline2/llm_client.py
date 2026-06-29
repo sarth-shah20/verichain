@@ -217,54 +217,69 @@ def _mock_response(messages: list[dict]) -> str:
     each module.
     """
     system = messages[0]["content"]
+
+    # Extract user message text (handles both plain string and vision list).
+    raw_user = messages[1]["content"] if len(messages) > 1 else ""
+    if isinstance(raw_user, list):
+        user_text = " ".join(
+            m.get("text", "") for m in raw_user if isinstance(m, dict)
+        )
+    else:
+        user_text = raw_user
+
     if "MOCK_TASK=extract" in system:
+        # Return the one ITR we have in verichain.db so the DB lookup succeeds.
         return json.dumps(
             {
                 "doc_type": "salaried_itr",
                 "fields": {
-                    "pan": "ABCDE1234F",
-                    "name": "RAHUL KUMAR SHARMA",
-                    "assessment_year": "2024-25",
-                    "gross_total_income": 1250000,
-                    "total_tax_paid": 145000,
-                    "employer_name": "ACME TECHNOLOGIES PVT LTD",
+                    "pan": "ABKPG7842M",
+                    "name": "Mahadev Balu Gadade",
+                    "assessment_year": "2025-26",
+                    "gross_total_income": 910000,
+                    "total_tax_paid": 60000,
+                    "employer_name": None,
+                    "acknowledgement_number": "315780214567891",
                 },
-                "normalization_notes": [
-                    "Translated regional-language label 'naam' -> 'name'",
-                    "Expanded 'A.Y.' -> 'assessment_year'",
-                ],
-                "extraction_confidence": 0.92,
+                "normalization_notes": [],
+                "extraction_confidence": 0.90,
                 "unreadable_fields": [],
             }
         )
     if "MOCK_TASK=verify" in system:
+        # In mock mode we return a clean "match" — the DB holds the correct data
+        # for ABKPG7842M so extracted vs. DB values agree.
+        # Genuine mismatch testing requires real LLM calls.
         return json.dumps(
             {
-                "match_status": "partial_match",
+                "match_status": "match",
+                "db_record_present": True,
                 "field_results": [
                     {
                         "field": "pan",
-                        "document_value": "ABCDE1234F",
-                        "database_value": "ABCDE1234F",
+                        "document_value": "ABKPG7842M",
+                        "database_value": "ABKPG7842M",
                         "match": True,
                         "note": "exact match",
                     },
                     {
                         "field": "gross_total_income",
-                        "document_value": 1250000,
-                        "database_value": 1180000,
-                        "match": False,
-                        "note": "Document income higher than filed return by 70,000",
+                        "document_value": 910000,
+                        "database_value": 910000,
+                        "match": True,
+                        "note": "exact match",
+                    },
+                    {
+                        "field": "assessment_year",
+                        "document_value": "2025-26",
+                        "database_value": "2025-26",
+                        "match": True,
+                        "note": "exact match",
                     },
                 ],
-                "discrepancies": [
-                    {
-                        "field": "gross_total_income",
-                        "severity": "high",
-                        "detail": "Stated income exceeds DB-of-record by 5.9%",
-                    }
-                ],
-                "verification_confidence": 0.88,
+                "discrepancies": [],
+                "verification_confidence": 0.92,
+                "summary": "All key fields match the authoritative record.",
             }
         )
     if "MOCK_TASK=cross_doc" in system:
@@ -285,25 +300,33 @@ def _mock_response(messages: list[dict]) -> str:
             }
         )
     if "MOCK_TASK=fusion" in system:
+        # Score based on verification match_status present in the user prompt.
+        # Fusion LLM uses 0=clean, 100=fraud; verify.py inverts to authenticity score.
+        if '"match_status": "match"' in user_text or '"match_status":"match"' in user_text:
+            risk_score, band, rec = 5, "low", "approve"
+            flags = [{"source": "verification", "evidence": "All fields match DB-of-record", "weight": "low"}]
+            rationale = "Content verification found no discrepancies; forensics show no manipulation signals."
+        elif '"match_status": "mismatch"' in user_text or '"match_status":"mismatch"' in user_text:
+            risk_score, band, rec = 82, "high", "decline"
+            flags = [
+                {"source": "verification", "evidence": "Critical field mismatch vs DB-of-record", "weight": "high"},
+                {"source": "forensics", "evidence": "Pixel-level anomaly near modified field", "weight": "high"},
+            ]
+            rationale = "Income figure differs significantly from authoritative record; forensic signals corroborate the edit."
+        else:
+            # unverified / partial_match / no record found → human review
+            risk_score, band, rec = 28, "low", "manual_review"
+            flags = [{"source": "verification", "evidence": "Document could not be fully verified against DB", "weight": "medium"}]
+            rationale = "No matching authoritative record; document authenticity cannot be confirmed without human review."
         return json.dumps(
             {
-                "overall_risk_score": 72,
-                "risk_band": "high",
-                "decision_recommendation": "manual_review",
-                "top_flags": [
-                    {
-                        "source": "verification",
-                        "evidence": "ITR income mismatch vs DB-of-record (+5.9%)",
-                        "weight": "high",
-                    },
-                    {
-                        "source": "forensics",
-                        "evidence": "ELA indicates edited region near income field",
-                        "weight": "high",
-                    },
-                ],
-                "rationale": "Independent content and forensic signals both point to the income figure being altered.",
+                "overall_risk_score": risk_score,
+                "risk_band": band,
+                "decision_recommendation": rec,
+                "top_flags": flags,
+                "corroborated_findings": [],
                 "false_flag_adjustments": [],
+                "rationale": rationale,
             }
         )
     # default

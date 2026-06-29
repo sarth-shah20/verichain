@@ -24,61 +24,82 @@ can compare like-for-like.
 
 from __future__ import annotations
 
+import os
+import sqlite3
 from typing import Any
 
-# --------------------------------------------------------------------------- #
-# Demo fixture data -- lets the whole pipeline run before the real DB exists.
-# Keyed by db_collection (see schemas.py), then by a lookup key.
-# Replace / remove once the real backend is wired in.
-# --------------------------------------------------------------------------- #
-SAMPLE_DB: dict[str, dict[str, dict[str, Any]]] = {
+# Retained for offline/mock mode (LLM_MOCK=1) so demo.py works without a DB.
+_MOCK_DB: dict[str, dict[str, dict[str, Any]]] = {
     "itr": {
-        "ABCDE1234F|2024-25": {
-            "pan": "ABCDE1234F",
-            "name": "RAHUL KUMAR SHARMA",
-            "assessment_year": "2024-25",
-            "gross_total_income": 1180000,
-            "total_tax_paid": 138000,
-            "employer_name": "ACME TECHNOLOGIES PVT LTD",
-            "acknowledgement_number": "1029384756120724",
-        }
-    },
-    "pan": {
-        "ABCDE1234F": {
-            "pan": "ABCDE1234F",
-            "name": "RAHUL KUMAR SHARMA",
-            "father_name": "SURESH SHARMA",
-            "date_of_birth": "1989-04-12",
-        }
-    },
-    "address_proof": {
-        "RAHUL KUMAR SHARMA": {
-            "name": "RAHUL KUMAR SHARMA",
-            "address": "12, MG Road, Bengaluru 560001",
-            "document_basis": "electricity bill",
-            "issue_date": "2026-03-10",
+        "ABKPG7842M|2025-26": {
+            "pan": "ABKPG7842M",
+            "name": "Mahadev Balu Gadade",
+            "assessment_year": "2025-26",
+            "gross_total_income": 910000,
+            "total_tax_paid": 60000,
+            "employer_name": None,
+            "acknowledgement_number": "315780214567891",
         }
     },
 }
 
+_DB_PATH = os.path.abspath(
+    os.environ.get(
+        "VERICHAIN_DB",
+        os.path.join(os.path.dirname(__file__), "..", "verichain.db"),
+    )
+)
+
+# Collections that map to the land_records table.
+_LAND_COLLECTIONS = {
+    "land_record", "karnataka_rtc", "tamilnadu_patta_chitta",
+    "maharashtra_712", "land",
+}
+
 
 def _make_lookup_key(key_fields: list[str], values: dict[str, Any]) -> str:
-    """Build the composite key used to index SAMPLE_DB (pipe-joined)."""
+    """Build the pipe-joined composite key used for DB lookups."""
     parts = [str(values.get(k, "")).strip() for k in key_fields]
     return "|".join(p for p in parts if p)
 
 
 def _backend_fetch(collection: str, key: str, values: dict[str, Any]) -> dict | None:
-    """
-    >>> FRIEND: REPLACE THIS BODY WITH THE REAL LOOKUP <<<
+    """Query verichain.db for the authoritative record.
 
-    `collection` = db_collection from the schema (e.g. "itr").
-    `key`        = composite lookup key built from the document's key fields.
-    `values`     = the raw key-field values (use whichever you prefer to query).
-
-    Return the authoritative record dict, or None.
+    Falls back to the in-memory mock when LLM_MOCK=1 or the DB file is absent.
     """
-    return SAMPLE_DB.get(collection, {}).get(key)
+    from config import is_mock  # noqa: PLC0415 — pipeline2 flat-import style
+
+    if is_mock():
+        return _MOCK_DB.get(collection, {}).get(key)
+
+    if not os.path.exists(_DB_PATH):
+        return None
+
+    conn = sqlite3.connect(_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    try:
+        if collection == "itr":
+            cur.execute(
+                "SELECT pan, name, assessment_year, gross_total_income, "
+                "total_tax_paid, employer_name, acknowledgement_number "
+                "FROM itr_records WHERE record_key = ?",
+                (key,),
+            )
+        elif collection in _LAND_COLLECTIONS:
+            cur.execute(
+                "SELECT * FROM land_records WHERE record_key = ?", (key,)
+            )
+        else:
+            return None
+
+        row = cur.fetchone()
+        return dict(row) if row else None
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        conn.close()
 
 
 # --------------------------------------------------------------------------- #
