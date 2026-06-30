@@ -23,8 +23,8 @@ def load_media(path: str, *, max_pdf_pages: int = 8) -> list[Media]:
 
     - Images are passed straight through.
     - PDFs are rasterised page-by-page (needs pymupdf). If pymupdf is missing we
-      fall back to sending the PDF bytes directly (Vertex/Gemini can read PDFs),
-      so the pipeline still works.
+      fall back to sending the PDF bytes directly (the model can read PDFs), so
+      the pipeline still works.
     """
     ext = os.path.splitext(path)[1].lower()
     if ext in IMAGE_EXTS:

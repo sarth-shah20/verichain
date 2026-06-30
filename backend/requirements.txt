@@ -1,0 +1,26 @@
+# VeriChain backend — full runtime dependencies
+# Run: pip install -r requirements.txt
+
+# --- Web server (backend/) ---
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.6.0          # routes use both .dict() and .model_dump(); v2 supports both
+
+# --- Pipeline 2: extraction + DB verify + fusion (model client) ---
+litellm>=1.40.0          # unified, provider-agnostic model client
+# Install your model provider's SDK separately (kept out of source so the
+# provider is not disclosed here) — whatever your configured LLM_MODEL requires.
+python-dotenv>=1.0.0     # load env vars from a .env file (optional)
+
+# --- Pipeline 1: forensics (image/PDF analysis) ---
+pymupdf>=1.24.0          # `fitz` — rasterise PDF pages to images
+pillow>=10.0.0           # PIL — image handling
+opencv-python>=4.9.0     # cv2 — pixel forensics + QR fallback
+numpy>=1.26.0
+scipy>=1.11.0
+pikepdf>=8.0.0           # PDF structure / signature provenance
+
+# --- Optional ---
+# pyzbar>=0.1.9          # better QR decoding; also needs the system `zbar` lib
+#                        #   macOS:  brew install zbar
+#                        # Without it, OpenCV's QRCodeDetector is used as fallback.

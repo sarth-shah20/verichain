@@ -1,3 +1,9 @@
+import os
+import sys
+
+# Make `routes` importable whether uvicorn is invoked from backend/ or project root.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -18,15 +24,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Routes — uncomment as each module is ready
-# from routes import verify, history, mock
-# app.include_router(verify.router)
-# app.include_router(history.router)
-# app.include_router(mock.router)
+from routes.verify import router as verify_router
+from routes.batch import router as batch_router
+app.include_router(batch_router)  # /verify/batch — register before /verify
+app.include_router(verify_router)
+
 
 @app.get("/")
 def root():
     return {"status": "VeriChain backend running"}
+
 
 @app.get("/health")
 def health():

@@ -38,3 +38,14 @@ ai/outputs/
 
 # Blockchain
 blockchain/build/
+
+CLAUDE.md
+**/CLAUDE.md
+.claude/settings.local.json
+docs/project-context-fraud-detection.md
+
+extracted/
+extract_docs.py
+raw_docs/
+load_authoritative.py
+create_demo_docs.py

@@ -23,7 +23,7 @@ import llm_client
 import utils
 
 _FUSION_SYSTEM = """You are the senior risk-fusion engine for a bank's loan
-underwriting. MOCK_TASK=fusion
+underwriting.
 
 You receive independent reports about the SAME application:
 - a content-verification report (does the document's data match the bank's
@@ -35,15 +35,33 @@ You receive independent reports about the SAME application:
 Produce ONE holistic risk assessment.
 
 Scoring guidance (0 = clean, 100 = almost certainly fraudulent):
-- Corroboration matters: when BOTH content and forensics flag the SAME field,
-  raise the score sharply (strong signal of deliberate tampering).
-- A high-severity content mismatch OR clear forensic editing alone is serious.
+- CROSS-PIPELINE corroboration is what matters most: raise the score sharply ONLY
+  when the CONTENT check and the FORENSICS check point at the SAME tampering (e.g.
+  a field whose value mismatches the bank's record AND shows pixel edits in that
+  region). Two forensic sub-methods agreeing (copy-move + DCT + ELA) is NOT
+  cross-pipeline corroboration on its own.
+- CRITICAL false-positive control: typed / scanned government e-records (7/12, RTC,
+  patta-chitta, ITRs, payslips) routinely trigger copy-move / DCT / ELA pixel
+  "manipulation" signals on their repeated text, table grids, seals and uniform
+  fills — even a low forensic authenticity score is common and benign on these.
+  When the CONTENT verification MATCHES the authoritative record (especially a
+  unique-ID / ULPIN / PAN / account-number match) and reports NO substantive
+  discrepancy, treat a lone forensic pixel-anomaly as LOW confidence. Do NOT
+  recommend "decline" on an uncorroborated forensic signal alone — cap such cases
+  at "manual_review" (keep the score below 60).
+- A high-severity CONTENT mismatch against the authoritative record is serious on
+  its own.
 - "unverified" (no DB record) is uncertainty, not proof of fraud -> moderate.
 - If a flag matches a known prior FALSE flag, down-weight it and note the
   adjustment.
+- Do NOT raise risk for informational/portal watermarks such as "for viewing
+  only", "not for legal purpose", or "informational copy". These are normal on
+  legitimately downloaded government e-record copies and are NOT fraud evidence.
 Bands: 0-29 low, 30-59 medium, 60-100 high.
 Recommendations: "approve" | "manual_review" | "decline".
 
+Be CONCISE so the JSON is never truncated: at most 4 top_flags, each "evidence"
+a single short sentence. Keep "rationale" to one or two sentences.
 Return STRICT JSON only. Cite concrete evidence from the inputs -- do not invent."""
 
 
@@ -122,6 +140,54 @@ def _readable_summary(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _worst_match_status(
+    verification: dict[str, Any] | list[dict[str, Any]],
+) -> str:
+    """Return the most concerning match_status across one or more reports."""
+    reports = verification if isinstance(verification, list) else [verification]
+    rank = {"mismatch": 3, "partial_match": 2, "unverified": 1, "match": 0}
+    worst = "match"
+    for r in reports:
+        ms = (r or {}).get("verification", {}).get("match_status", "unverified")
+        if rank.get(ms, 1) > rank.get(worst, 0):
+            worst = ms
+    return worst
+
+
+def _fallback_fusion(
+    verification: dict[str, Any] | list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Heuristic verdict used when the fusion LLM output can't be parsed.
+
+    A malformed/truncated LLM response must not throw away a verification that
+    already succeeded, so we derive a sensible risk verdict from the content
+    match_status (mirrors the mock-fusion convention: 0 = clean, 100 = fraud).
+    """
+    ms = _worst_match_status(verification)
+    if ms == "match":
+        risk, band, rec = 10, "low", "approve"
+        evidence = "All checked fields match the authoritative DB record."
+    elif ms == "mismatch":
+        risk, band, rec = 82, "high", "decline"
+        evidence = "Critical field mismatch vs the authoritative DB record."
+    else:  # unverified / partial_match
+        risk, band, rec = 35, "medium", "manual_review"
+        evidence = "Document could not be fully verified against an authoritative record."
+    return {
+        "overall_risk_score": risk,
+        "risk_band": band,
+        "decision_recommendation": rec,
+        "top_flags": [{"source": "verification", "evidence": evidence, "weight": "medium"}],
+        "corroborated_findings": [],
+        "false_flag_adjustments": [],
+        "rationale": (
+            "Fusion LLM output could not be parsed; verdict derived from the "
+            f"content verification match_status ({ms})."
+        ),
+        "fallback": True,
+    }
+
+
 def fuse_reports(
     verification: dict[str, Any] | list[dict[str, Any]],
     forensics: dict[str, Any],
@@ -140,11 +206,16 @@ def fuse_reports(
         flag_history: optional list of known prior false flags.
         out_path: optional path to write the holistic JSON.
     """
-    fusion = llm_client.call_text(
-        _FUSION_SYSTEM,
-        _build_user_prompt(verification, forensics, cross_doc, flag_history),
-        json_mode=True,
-    )
+    try:
+        fusion = llm_client.call_text(
+            _FUSION_SYSTEM,
+            _build_user_prompt(verification, forensics, cross_doc, flag_history),
+            json_mode=True,
+        )
+    except Exception:
+        # A malformed/truncated LLM response must not sink a document whose
+        # content verification already succeeded — degrade to a heuristic verdict.
+        fusion = _fallback_fusion(verification)
 
     report: dict[str, Any] = {
         "report_type": "holistic_risk",
