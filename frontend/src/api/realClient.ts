@@ -20,7 +20,7 @@ import { buildResultFromBatch, type BackendBatchJob } from "./adapter";
 // /verify call can't. Job state lives server-side, so a results page survives
 // reload. The frozen single-doc /verify contract is left untouched.
 //
-// Activated by VITE_USE_MOCK=false (+ VITE_API_BASE_URL). See api/index.ts.
+// Base URL comes from VITE_API_BASE_URL. See api/index.ts.
 // ---------------------------------------------------------------------------
 
 interface LocalJob {
@@ -53,7 +53,12 @@ export class RealVeriChainApi implements VeriChainApi {
   }
 
   private async fetchJob(jobId: string): Promise<BackendBatchJob> {
-    const res = await fetch(this.url(`/verify/batch/${encodeURIComponent(jobId)}`));
+    // no-store: the poll must always see fresh job state. Without this the
+    // browser can replay a cached early "processing" response and the UI gets
+    // stuck at 100% even though the job is already "done".
+    const res = await fetch(this.url(`/verify/batch/${encodeURIComponent(jobId)}`), {
+      cache: "no-store",
+    });
     if (res.status === 404) {
       throw new Error("Job not found — it may have expired. Start a new verification.");
     }
@@ -77,9 +82,12 @@ export class RealVeriChainApi implements VeriChainApi {
       }))
     );
 
-    // Real previews for image uploads; PDFs fall back to a placeholder downstream.
+    // Real previews for BOTH image and PDF uploads (PDFs render in an iframe in
+    // the viewer; cards still use a placeholder thumbnail — see adapter).
     const thumbnails = options.files.map((sf) =>
-      sf.file.type.startsWith("image/") ? URL.createObjectURL(sf.file) : null
+      sf.file.type.startsWith("image/") || sf.file.type === "application/pdf"
+        ? URL.createObjectURL(sf.file)
+        : null
     );
 
     const res = await fetch(this.url("/verify/batch"), {
@@ -150,7 +158,7 @@ export class RealVeriChainApi implements VeriChainApi {
         submitted_at: result.submitted_at,
         document_count: result.documents.length,
         verdict: result.overall.verdict,
-        risk_score: result.overall.risk_score,
+        trust_score: result.overall.trust_score,
       });
     }
     return items.sort((a, b) => b.submitted_at.localeCompare(a.submitted_at));

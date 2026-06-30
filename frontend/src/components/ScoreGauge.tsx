@@ -10,14 +10,14 @@ interface ScoreGaugeProps {
 }
 
 /**
- * Circular risk gauge. Higher score = riskier. Color follows the risk scale;
- * a text label is always shown so meaning never relies on color alone.
+ * Circular trust gauge. Higher score = more genuine. Color follows the trust
+ * scale; a text label is always shown so meaning never relies on color alone.
  */
 export function ScoreGauge({
   score,
   size = 160,
   strokeWidth = 12,
-  label = "Risk score",
+  label = "Trust score",
   showVerdict = true,
 }: ScoreGaugeProps) {
   const clamped = Math.max(0, Math.min(100, score));

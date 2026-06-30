@@ -29,8 +29,14 @@ export function DocumentViewer({
 }: DocumentViewerProps) {
   const [showOverlay, setShowOverlay] = useState(true);
 
-  // Prefer the forensic heatmap when present, otherwise the plain thumbnail.
-  const imageSrc = doc.pipeline1.heatmap_url ?? doc.thumbnail_url;
+  // A PDF upload renders in an embedded viewer; images (and forensic heatmaps)
+  // render as a bitmap with clickable region overlays.
+  const isPdf = /\.pdf$/i.test(doc.filename);
+  const pdfSrc = isPdf ? (doc.preview_url ?? null) : null;
+  // Prefer the forensic heatmap when present, otherwise the real preview, then
+  // the card thumbnail as a last resort.
+  const imageSrc =
+    doc.pipeline1.heatmap_url ?? (isPdf ? null : (doc.preview_url ?? doc.thumbnail_url));
   const markers = collectRegions(doc);
 
   return (
@@ -59,7 +65,13 @@ export function DocumentViewer({
       </div>
 
       <div className="relative bg-slate-100 dark:bg-slate-800">
-        {imageSrc ? (
+        {pdfSrc ? (
+          <iframe
+            src={pdfSrc}
+            title={`Document ${doc.filename}`}
+            className="block h-[640px] w-full border-0"
+          />
+        ) : imageSrc ? (
           <img
             src={imageSrc}
             alt={`Document ${doc.filename}${

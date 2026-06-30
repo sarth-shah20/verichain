@@ -1,20 +1,20 @@
 import type { Severity, Verdict } from "@/api/types";
 
 // ---------------------------------------------------------------------------
-// Risk thresholds (adjustable in one place).
-//   0–39  → green  "Genuine / Low risk"
-//   40–69 → amber  "Needs review"
-//   70–100 → red   "High risk / Likely forged"
+// Trust / authenticity score (adjustable in one place). HIGHER = MORE genuine.
+//   70–100 → green  "Genuine"
+//   40–69  → amber  "Needs review"
+//   0–39   → red    "High risk / Likely forged"
 // ---------------------------------------------------------------------------
-export const RISK_THRESHOLDS = {
-  review: 40,
-  high: 70,
+export const TRUST_THRESHOLDS = {
+  review: 40, // ≥ this → at least review
+  genuine: 70, // ≥ this → genuine
 } as const;
 
 export function verdictForScore(score: number): Verdict {
-  if (score >= RISK_THRESHOLDS.high) return "high_risk";
-  if (score >= RISK_THRESHOLDS.review) return "review";
-  return "genuine";
+  if (score >= TRUST_THRESHOLDS.genuine) return "genuine";
+  if (score >= TRUST_THRESHOLDS.review) return "review";
+  return "high_risk";
 }
 
 export interface VerdictMeta {

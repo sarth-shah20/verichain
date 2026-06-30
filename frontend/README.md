@@ -4,9 +4,8 @@ A clean, trustworthy UI for a bank's loan-underwriting team to verify applicant
 documents (bank statements, land records / 7-12 extracts, ITRs, salary slips)
 for **tampering, forgery and content mismatches**.
 
-This repository is the **frontend only**. It ships with a typed **mock API
-layer** so the whole app is demoable today with zero backend. Switching to the
-real backend later is a one-line env change — no code changes.
+This is the **frontend**. It talks to the live VeriChain backend through a typed
+API layer (`src/api/`), pointed at the backend via `VITE_API_BASE_URL`.
 
 ---
 
@@ -17,8 +16,8 @@ npm install
 npm run dev
 ```
 
-Open the URL Vite prints (default http://localhost:5173). The app runs entirely
-on mock data out of the box.
+Open the URL Vite prints (default http://localhost:5173). Make sure the backend
+is running and `VITE_API_BASE_URL` points at it (see below).
 
 Other scripts:
 
@@ -30,38 +29,26 @@ npm run typecheck  # types only
 
 ---
 
-## The demo story
+## The flow
 
-Three sample applications are bundled and reachable from **History** (and each
-fresh **New Verification** rotates through them):
-
-| Application | Verdict        | What it shows                                                            |
-| ----------- | -------------- | ------------------------------------------------------------------------ |
-| `APP-10231` | 🟢 Genuine     | Low score, no high-severity signals, fields reconcile.                   |
-| `APP-10544` | 🟠 Needs review | A missing QR + an unverified field; medium signals.                      |
-| `APP-10987` | 🔴 High risk   | Edited closing balance with a **heatmap region**, font + triangulation signals, a field mismatch, and a **cross-document income mismatch**. |
-
-To experience the full flow: **New Verification → drop any PDF/JPG/PNG →
-Verify → processing → results dashboard → open a document → evidence view.**
+**New Verification → drop any PDF/JPG/PNG → Verify → processing → results
+dashboard → open a document → evidence view.** Each submission is verified live
+by the backend.
 
 ---
 
-## Mock ⇄ real backend switch
+## Backend connection
 
-The single switch lives in **`src/api/index.ts`**, driven by env vars:
+The API client lives in **`src/api/index.ts`** and is configured by one env var:
 
 ```bash
-# .env
-VITE_USE_MOCK=true                       # mock is ON unless this is exactly "false"
-VITE_API_BASE_URL=http://localhost:8000  # used only when VITE_USE_MOCK=false
+# .env.local
+VITE_API_BASE_URL=http://localhost:8000  # base URL of the running backend
 ```
 
-- `VITE_USE_MOCK=true` (default) → `MockVeriChainApi` (in-memory, sample data).
-- `VITE_USE_MOCK=false` → `RealVeriChainApi`, calling `VITE_API_BASE_URL`.
-
-Both classes implement the **same** `VeriChainApi` interface
-(`src/api/types.ts`), so nothing else in the app changes. Restart the dev server
-after editing `.env`.
+`RealVeriChainApi` (`src/api/realClient.ts`) calls that base URL and implements
+the `VeriChainApi` interface (`src/api/types.ts`). Restart the dev server after
+editing `.env.local`.
 
 ---
 
@@ -129,33 +116,31 @@ Multipart form: one or more `files`, optional `application_id`.
 `Field`: `{ "key": "Closing Balance", "value": "₹1,15,000", "status": "ok|mismatch|missing" }`
 
 > **Note on `region`:** the UI treats `x/y/w/h` as **percentages of the document
-> image box (0–100)** so overlay boxes scale responsively. The mock
-> `GET /api/history` endpoint returns an array of `HistoryItem` (see types).
+> image box (0–100)** so overlay boxes scale responsively.
 
 ---
 
 ## Architecture & conventions
 
-The two-pipeline architecture is reflected in the UI: **Pipeline 1 (Authenticity
-& Forensics) is teal**, **Pipeline 2 (Content Extraction & Validation) is
-indigo** — so the interface teaches the officer *why* something was flagged.
+The two-pipeline architecture is reflected in the UI: **Forensics is teal**,
+**Verification is indigo** — so the interface teaches the officer *why*
+something was flagged.
 
-Risk color scale (tokens in `tailwind.config.js`, thresholds in
-`src/lib/risk.ts`):
+Trust score color scale — HIGHER = more genuine (tokens in `tailwind.config.js`,
+thresholds in `src/lib/risk.ts`):
 
-- `0–39` → green · Genuine / Low risk
+- `70–100` → green · Genuine
 - `40–69` → amber · Needs review
-- `70–100` → red · High risk / Likely forged
+- `0–39` → red · High risk / Likely forged
 
-Every risk color is paired with a text label and icon — meaning never relies on
+Every color is paired with a text label and icon — meaning never relies on
 color alone (WCAG AA).
 
 ### Project structure
 
 ```
 src/
-  api/            client (mock/real switch), types, mock data
-    mock/         in-memory backend + sample applications
+  api/            API client (realClient), adapter, types
   app/            router, layout/shell, theme, toast, client store
   components/     ScoreGauge, VerdictPill, SeverityBadge, SignalCard,
                   FileDropzone, DocumentCard, DocumentViewer, FieldsTable, …
@@ -182,5 +167,5 @@ React 18 · Vite · TypeScript (strict, no `any`) · Tailwind CSS · React Route
 lucide-react icons. Light/dark theme, keyboard-navigable, responsive.
 
 > Placeholder thumbnails/heatmaps are generated as inline SVG data URIs
-> (`src/lib/placeholders.ts`) so the mock demo renders fully offline. The real
-> backend returns real image URLs in the same fields.
+> (`src/lib/placeholders.ts`) for documents without a real preview image (e.g.
+> PDF cards). The backend returns real image URLs in the same fields.

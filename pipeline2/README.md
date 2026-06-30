@@ -20,8 +20,8 @@ Input doc ─▶ extract (VLM/OCR + normalize) ─▶ DB fetch ─▶ verify (se
 
 | File | Role |
 |------|------|
-| `config.py` | Model id (from env), Vertex routing, mock toggle. **Model name is never hard-coded.** |
-| `llm_client.py` | litellm wrapper (text + vision), JSON parsing, deterministic mock backend. |
+| `config.py` | Model id and tuning read from env. **Model name is never hard-coded.** |
+| `llm_client.py` | Model client wrapper (text + vision) + robust JSON parsing. |
 | `schemas.py` | Per-document-type extraction + validation schemas. Add a doc type here only. |
 | `db.py` | **Integration point for the DB teammate.** Pipeline only calls `fetch_record(...)`. |
 | `extract.py` | Step 1 — OCR + normalization in one LLM session → structured fields. |
@@ -29,30 +29,23 @@ Input doc ─▶ extract (VLM/OCR + normalize) ─▶ DB fetch ─▶ verify (se
 | `pipeline.py` | Orchestrates extract → DB → verify → verification report. |
 | `discrepancy.py` | Cross-checks several documents from one applicant. |
 | `fusion.py` | Merges verification + forensics (+ cross-doc + flag history) → risk score. |
-| `demo.py` | Full offline run with the mock LLM. |
+| `demo.py` | End-to-end run over real document files. |
 
 ## Setup
 
 ```bash
 pip install -r requirements.txt
+# plus the SDK your configured model requires (see requirements.txt note)
 ```
 
-Environment (Vertex AI):
+Environment:
 
 ```bash
-export LLM_MODEL="vertex_ai/<model-id>"     # kept out of source
-export VERTEXAI_PROJECT="your-gcp-project"
-export VERTEXAI_LOCATION="us-central1"
-export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"
+export LLM_MODEL="<your-model-id>"     # kept out of source
+# any provider credentials your model needs are read from the environment
 ```
 
 ## Run
-
-Offline demo (no credentials needed):
-
-```bash
-LLM_MOCK=1 python demo.py
-```
 
 Verify one document:
 
@@ -99,9 +92,7 @@ Unknown types fall back to a generic schema. Add new types in `schemas.py`.
 
 ## Notes
 
-- Extraction and verification run as **separate LLM sessions** by design — the
+- Extraction and verification run as **separate model sessions** by design — the
   verifier judges the A-vs-B comparison on data alone, with no extraction context.
-- `LLM_MOCK=1` returns canned, schema-shaped JSON so the full flow is testable
-  offline / in CI without Vertex.
 - Aadhaar handling stores only the last 4 digits.
 ```

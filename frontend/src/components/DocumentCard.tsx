@@ -36,10 +36,10 @@ export function DocumentCard({ doc, onOpen }: DocumentCardProps) {
         )}
         <span
           className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold text-white shadow"
-          style={{ backgroundColor: colorForScore(doc.risk_score) }}
-          aria-label={`Risk score ${doc.risk_score}`}
+          style={{ backgroundColor: colorForScore(doc.trust_score) }}
+          aria-label={`Trust score ${doc.trust_score}`}
         >
-          {doc.risk_score}
+          {doc.trust_score}
         </span>
       </div>
       <div className="flex flex-1 flex-col gap-3 p-4">

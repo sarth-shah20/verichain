@@ -15,7 +15,7 @@ import schemas
 import utils
 
 _EXTRACT_SYSTEM = """You are a meticulous document-understanding engine for a bank's
-loan-underwriting pipeline. MOCK_TASK=extract
+loan-underwriting pipeline.
 
 Your job, in ONE pass over the supplied document image(s)/PDF:
 1. OCR: read ALL text, including stamps, seals, handwriting and tables.
@@ -30,7 +30,15 @@ Rules:
 - Never guess or fabricate values. Only report what is actually present.
 - Preserve names in their printed form (uppercase as printed is fine).
 - For Aadhaar, output ONLY the last 4 digits, never the full number.
-- Return STRICT JSON. No prose, no markdown."""
+- IGNORE informational watermarks/disclaimers such as "FOR VIEWING ONLY",
+  "NOT FOR LEGAL PURPOSE", "INFORMATIONAL COPY", or e-portal download notices.
+  These appear on legitimately downloaded government e-record copies and are NOT
+  tampering — do NOT list them under "extraction_observations".
+- BE CONCISE so the JSON is never truncated: return ONLY the requested fields.
+  Do NOT transcribe full crop/tenancy tables or every row. Keep
+  "normalization_notes" and "extraction_observations" to at most 3 SHORT items
+  each (or leave them empty) — one brief phrase per item, not paragraphs.
+- Return STRICT, COMPACT JSON. No prose, no markdown."""
 
 _CLASSIFY_LINE = (
     "First, classify this document. Choose the single best matching type from "
@@ -86,12 +94,18 @@ def extract_document(path: str, doc_type: str | None = None) -> dict[str, Any]:
 
     result = llm_client.call_vision(_EXTRACT_SYSTEM, user_prompt, media, json_mode=True)
 
-    # If the model classified a more specific type than we assumed, re-fetch the
-    # schema so verification uses the right key fields. (One extra pass only if
-    # the model disagrees AND we had auto-detect.)
+    # Auto-detect refinement: on the first pass we only had the GENERIC schema's
+    # fields (name/title/ids/amounts), so the type-specific KEY fields (e.g. a
+    # land record's state/taluka/village/survey_number) were never pulled and the
+    # DB lookup can't succeed. If the model identified a known specific type,
+    # re-extract with THAT schema's real fields so verification gets proper keys.
     detected = result.get("doc_type")
     if doc_type is None and detected and detected in schemas.SCHEMAS and detected != "unknown":
         schema = schemas.get_schema(detected)
+        result = llm_client.call_vision(
+            _EXTRACT_SYSTEM, _build_user_prompt(schema, detected), media, json_mode=True
+        )
+        detected = result.get("doc_type") or detected
 
     result["_schema"] = {
         "doc_type": detected or doc_type or "unknown",

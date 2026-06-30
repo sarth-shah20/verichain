@@ -157,10 +157,10 @@ export function NewVerification() {
                 Two pipelines run on every file
               </p>
               <p className="mt-1.5">
-                <span className="font-medium text-pipeline1">Authenticity</span>{" "}
+                <span className="font-medium text-pipeline1">Forensics</span>{" "}
                 checks if the file is physically genuine.{" "}
-                <span className="font-medium text-pipeline2">Content</span> reads
-                and cross-validates the data.
+                <span className="font-medium text-pipeline2">Verification</span>{" "}
+                reads and cross-validates the data.
               </p>
             </div>
 

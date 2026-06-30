@@ -102,9 +102,9 @@ export function History() {
                   <td className="px-5 py-3.5">
                     <span
                       className="tnum inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white"
-                      style={{ backgroundColor: colorForScore(row.risk_score) }}
+                      style={{ backgroundColor: colorForScore(row.trust_score) }}
                     >
-                      {row.risk_score}
+                      {row.trust_score}
                     </span>
                   </td>
                   <td className="px-5 py-3.5">

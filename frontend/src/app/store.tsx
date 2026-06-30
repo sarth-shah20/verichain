@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type { VerificationResult } from "@/api/types";
 
 // NOTE: small client-state cache for the current verification result so the
@@ -16,16 +16,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [current, setCurrentResult] = useState<VerificationResult | null>(null);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
 
-  const setCurrent = (jobId: string, r: VerificationResult | null) => {
-    setCurrentJobId(jobId);
-    setCurrentResult(r);
-  };
-
-  return (
-    <StoreContext.Provider value={{ current, currentJobId, setCurrent }}>
-      {children}
-    </StoreContext.Provider>
+  // Stable identity: Processing's polling effect depends on setCurrent, so a
+  // new reference each render would tear the effect down mid-poll and block
+  // navigation to the results page (job stuck at 100%).
+  const setCurrent = useCallback(
+    (jobId: string, r: VerificationResult | null) => {
+      setCurrentJobId(jobId);
+      setCurrentResult(r);
+    },
+    []
   );
+
+  const value = useMemo(
+    () => ({ current, currentJobId, setCurrent }),
+    [current, currentJobId, setCurrent]
+  );
+
+  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
 export function useStore(): StoreValue {

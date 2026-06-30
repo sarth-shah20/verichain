@@ -74,7 +74,7 @@ export function Results() {
       {/* Hero verdict */}
       <section className="card flex flex-col gap-6 p-6 md:flex-row md:items-center">
         <div className="flex shrink-0 justify-center">
-          <ScoreGauge score={overall.risk_score} size={180} />
+          <ScoreGauge score={overall.trust_score} size={180} />
         </div>
         <div className="flex-1 space-y-3">
           <div className="flex flex-wrap items-center gap-3">

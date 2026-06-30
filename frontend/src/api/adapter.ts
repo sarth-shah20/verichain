@@ -9,10 +9,10 @@
 //
 // IMPORTANT — score direction:
 //   The backend `risk_score` is actually an AUTHENTICITY score (higher = more
-//   genuine: 96 ≈ approve, 18 ≈ reject). The UI gauge expects a RISK score
-//   (higher = riskier). We invert and, crucially, clamp into the band that
-//   matches the authoritative `decision`, so the gauge colour can never
-//   disagree with the verdict pill.
+//   genuine: 96 ≈ approve, 18 ≈ reject). The UI now shows a TRUST score with the
+//   SAME direction (higher = more genuine), so we pass it through (no inversion)
+//   and clamp it into the band that matches the authoritative `decision`, so the
+//   gauge colour can never disagree with the verdict pill.
 // ---------------------------------------------------------------------------
 
 import type {
@@ -26,7 +26,7 @@ import type {
   Verdict,
   VerificationResult,
 } from "./types";
-import { RISK_THRESHOLDS } from "@/lib/risk";
+import { TRUST_THRESHOLDS } from "@/lib/risk";
 import { docPlaceholder } from "@/lib/placeholders";
 
 // ── Frozen backend wire types (mirror README.md /verify contract) ────────────
@@ -86,22 +86,22 @@ export function decisionToVerdict(decision: string): Verdict {
 }
 
 /**
- * Convert the backend authenticity score (higher = genuine) into the UI's risk
- * score (higher = riskier), then clamp it into the band that matches the
- * authoritative `decision`. This guarantees the gauge (which derives colour
- * from the score via RISK_THRESHOLDS) agrees with the verdict pill.
+ * Map the backend authenticity score (higher = genuine) to the UI's TRUST score
+ * (also higher = genuine), clamped into the band that matches the authoritative
+ * `decision`. This guarantees the gauge (which derives colour from the score via
+ * TRUST_THRESHOLDS) always agrees with the verdict pill.
  */
-export function toRiskScore(decision: string, authScore: number): number {
-  const risk = 100 - clamp(Math.round(authScore), 0, 100);
+export function toTrustScore(decision: string, authScore: number): number {
+  const trust = clamp(Math.round(authScore), 0, 100);
   switch (decision) {
-    case "auto_approve": // genuine band: [0, review-1]
-      return Math.min(risk, RISK_THRESHOLDS.review - 1);
-    case "human_review": // review band: [review, high-1]
-      return clamp(risk, RISK_THRESHOLDS.review, RISK_THRESHOLDS.high - 1);
-    case "auto_reject": // high-risk band: [high, 100]
-      return Math.max(risk, RISK_THRESHOLDS.high);
+    case "auto_approve": // genuine band: [genuine, 100]
+      return Math.max(trust, TRUST_THRESHOLDS.genuine);
+    case "human_review": // review band: [review, genuine-1]
+      return clamp(trust, TRUST_THRESHOLDS.review, TRUST_THRESHOLDS.genuine - 1);
+    case "auto_reject": // high-risk band: [0, review-1]
+      return Math.min(trust, TRUST_THRESHOLDS.review - 1);
     default:
-      return risk;
+      return trust;
   }
 }
 
@@ -242,7 +242,7 @@ function resolveHeatmap(url: string | null, apiBase: string): string | null {
 function mapDocument(input: DocInput, apiBase: string): DocumentResult {
   const { resp, filename, docType, thumbnailUrl } = input;
   const verdict = decisionToVerdict(resp.decision);
-  const riskScore = toRiskScore(resp.decision, resp.risk_score);
+  const trustScore = toTrustScore(resp.decision, resp.risk_score);
   const sev = severityForVerdict(verdict);
 
   // Route each backend `reason` string to the pipeline it most likely came from.
@@ -298,20 +298,24 @@ function mapDocument(input: DocInput, apiBase: string): DocumentResult {
     }));
   }
 
+  const isPdf = /\.pdf$/i.test(filename);
   return {
     doc_id: `doc_${input.index}`,
     filename,
     doc_type: docType,
-    thumbnail_url: thumbnailUrl ?? docPlaceholder(docType),
-    risk_score: riskScore,
+    // Cards use a clean placeholder for PDFs; images use their real preview.
+    thumbnail_url: isPdf ? docPlaceholder(docType) : (thumbnailUrl ?? docPlaceholder(docType)),
+    // The viewer loads the actual uploaded file (image or PDF) from here.
+    preview_url: thumbnailUrl ?? null,
+    trust_score: trustScore,
     verdict,
     pipeline1: {
-      score: riskScore,
+      score: trustScore,
       heatmap_url: heatmap,
       signals: p1Signals,
     },
     pipeline2: {
-      score: riskScore,
+      score: trustScore,
       extracted_fields: extracted,
       signals: p2Signals,
     },
@@ -356,7 +360,7 @@ function buildOverall(docs: DocInput[]): OverallResult {
   if (topReason) summary += ` Key signal: ${topReason}`;
 
   return {
-    risk_score: toRiskScore(worst, minAuth),
+    trust_score: toTrustScore(worst, minAuth),
     verdict,
     confidence: confidenceFor(minAuth),
     summary,
@@ -444,7 +448,7 @@ function overallFromBackend(
   if (overall.reasons?.[0]) summary += ` Key signal: ${overall.reasons[0]}`;
 
   return {
-    risk_score: toRiskScore(overall.decision, overall.risk_score),
+    trust_score: toTrustScore(overall.decision, overall.risk_score),
     verdict,
     confidence: confidenceFor(overall.risk_score),
     summary,
@@ -473,7 +477,7 @@ export function buildResultFromBatch(
   const overall: OverallResult = job.overall
     ? overallFromBackend(job.overall, documents.length)
     : {
-        risk_score: 50,
+        trust_score: 50,
         verdict: "review",
         confidence: 0.6,
         summary: "Verification could not be completed.",

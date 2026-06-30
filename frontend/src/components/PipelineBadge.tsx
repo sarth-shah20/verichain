@@ -24,7 +24,7 @@ export function PipelineBadge({
       )}
     >
       <Icon className="h-3.5 w-3.5" />
-      {isOne ? "Pipeline 1 · Authenticity" : "Pipeline 2 · Content"}
+      {isOne ? "Forensics" : "Verification"}
     </span>
   );
 }

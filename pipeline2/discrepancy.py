@@ -20,7 +20,7 @@ import llm_client
 import utils
 
 _CROSS_SYSTEM = """You are a consistency analyst for a bank's loan-underwriting
-pipeline. MOCK_TASK=cross_doc
+pipeline.
 
 You receive the extracted fields from MULTIPLE documents submitted by ONE
 applicant. Identify attributes that appear in more than one document (e.g. name,

@@ -124,7 +124,7 @@ export function DocumentDetail() {
         <div className="flex items-center gap-4">
           <VerdictPill verdict={doc.verdict} />
           <ScoreGauge
-            score={doc.risk_score}
+            score={doc.trust_score}
             size={84}
             strokeWidth={8}
             showVerdict={false}
@@ -241,7 +241,7 @@ export function DocumentDetail() {
             <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500">
               Extracted fields
               <span className="font-normal normal-case text-slate-400">
-                (Pipeline 2)
+                (Verification)
               </span>
             </h2>
             <FieldsTable fields={doc.pipeline2.extracted_fields} />

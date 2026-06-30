@@ -57,7 +57,7 @@ _DB_PATH = os.path.abspath(
 _DOC_TYPE_MAP: dict[str, str | None] = {
     "itr":            "salaried_itr",
     "salary_slip":    "payslip",
-    "land_record":    None,   # let pipeline2 auto-detect the state form
+    "land_record":    "land_record",   # unified 7/12 · RTC · patta-chitta schema
     "bank_statement": "bank_statement",
     "legal_doc":      None,
 }
@@ -65,10 +65,10 @@ _DOC_TYPE_MAP: dict[str, str | None] = {
 # Issuer label returned in field_verification.issuer
 _ISSUER_MAP: dict[str, str] = {
     "itr":            "CBDT",
-    "salary_slip":    "mock_registry",
+    "salary_slip":    "Internal Registry",
     "land_record":    "CERSAI",
-    "bank_statement": "mock_registry",
-    "legal_doc":      "mock_registry",
+    "bank_statement": "Internal Registry",
+    "legal_doc":      "Internal Registry",
 }
 
 
@@ -116,16 +116,32 @@ def _run_pipeline1(file_path: str) -> dict[str, Any]:
         if classification.document_type == "scanned_image":
             tier2 = run_tier2(file_path, classification)
 
-        tiers = [tier0.model_dump(), tier1.model_dump()]
-        if tier2 is not None:
-            tiers.append(tier2.model_dump())
+        # Headline authenticity rests on the RELIABLE tiers only: provenance
+        # (tier0: signatures/QR/C2PA) and structure (tier1: metadata/fonts).
+        reliable = [tier0.model_dump(), tier1.model_dump()]
 
-        return {
+        result: dict[str, Any] = {
             "classification": classification.model_dump(),
-            "tiers": tiers,
-            # Overall authenticity is the minimum across tiers (weakest link).
-            "overall_authenticity_score": min(t["authenticity_score"] for t in tiers),
+            "tiers": reliable,
+            "overall_authenticity_score": min(t["authenticity_score"] for t in reliable),
         }
+
+        # Tier 2 = pixel forensics (copy-move/DCT/ELA). These are designed for
+        # natural photographs and false-positive heavily on typed / born-digital
+        # government e-records (repeated glyphs, table grids, seals, uniform
+        # fills). Keep their findings for transparency, but mark them ADVISORY so
+        # they neither tank the authenticity score nor drive the fused verdict on
+        # their own — fusion is instructed to treat them as low-confidence.
+        if tier2 is not None:
+            advisory = tier2.model_dump()
+            advisory["advisory_note"] = (
+                "Pixel forensics (copy-move/DCT/ELA) are unreliable on typed / "
+                "born-digital e-records and frequently false-positive on repeated "
+                "text, table grids and seals. Treat as advisory, NOT decisive."
+            )
+            result["advisory_pixel_forensics"] = advisory
+
+        return result
     except Exception as exc:
         return {"error": str(exc), "tiers": []}
 
@@ -146,6 +162,23 @@ def _decide(auth_score: int) -> tuple[str, str]:
     if auth_score >= 60:
         return "route_2", "human_review"
     return "route_3", "auto_reject"
+
+
+def _resolve_issuer(verification_report: dict, document_type: str) -> str:
+    """Pick the authority label from the DETECTED/verified type, not the request.
+
+    Auto-detected uploads arrive as document_type "unknown", which would wrongly
+    fall back to the generic registry label; the real type comes from pipeline2's
+    classification and the DB collection it matched against.
+    """
+    detected = (verification_report.get("document", {}).get("doc_type") or "").lower()
+    source = (verification_report.get("database", {}).get("source") or "").lower()
+    key = f"{detected} {source}"
+    if "itr" in key:
+        return "CBDT"
+    if any(t in key for t in ("land", "rtc", "patta", "712", "cersai")):
+        return "CERSAI"
+    return _ISSUER_MAP.get(document_type, "Internal Registry")
 
 
 def _field_verification(verification_report: dict, document_type: str) -> FieldVerification:
@@ -169,7 +202,7 @@ def _field_verification(verification_report: dict, document_type: str) -> FieldV
 
     return FieldVerification(
         status=status,
-        issuer=_ISSUER_MAP.get(document_type, "mock_registry"),
+        issuer=_resolve_issuer(verification_report, document_type),
         matched_fields=matched,
     )
 

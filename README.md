@@ -106,7 +106,7 @@ All integration is built around this. Do not change without informing each other
   "heatmap_url": "string | null",
   "field_verification": {
     "status": "verified | mismatch | unverifiable",
-    "issuer": "CBDT | CERSAI | mock_registry",
+    "issuer": "CBDT | CERSAI | Internal Registry",
     "matched_fields": ["owner_name", "survey_number", "area"]
   }
 }
@@ -177,7 +177,7 @@ Poll until `status` is `done` or `error`.
       "heatmap_url": "string | null",
       "field_verification": {
         "status": "verified | mismatch | unverifiable",
-        "issuer": "CBDT | CERSAI | mock_registry",
+        "issuer": "CBDT | CERSAI | Internal Registry",
         "matched_fields": ["pan", "gross_total_income"]
       },
       "extracted_fields": { "pan": "ABKPG7842M", "gross_total_income": 910000 }

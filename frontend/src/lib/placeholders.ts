@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
-// Self-contained placeholder image generators (inline SVG data URIs) so the
-// mock demo renders fully offline with no external image hosting. The real
-// backend returns real PNG/JPG URLs in the same fields.
+// Self-contained placeholder image generators (inline SVG data URIs) used when
+// a document has no real preview/heatmap image (e.g. PDF cards), with no
+// external image hosting.
 // ---------------------------------------------------------------------------
 import type { DocType } from "@/api/types";
 

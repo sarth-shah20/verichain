@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Thread
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 import jobs
@@ -34,7 +34,6 @@ import jobs
 from routes.verify import process_document, _decide, _log_blockchain
 
 import discrepancy as p2_discrepancy  # pipeline2/discrepancy.py
-import fusion as p2_fusion            # pipeline2/fusion.py
 
 
 router = APIRouter(prefix="/verify/batch", tags=["verify"])
@@ -80,19 +79,63 @@ def _map_cross(cross_report: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def _overall_from_holistic(holistic: dict[str, Any]) -> dict[str, Any]:
-    """Map a fused holistic report → the overall verdict block (authenticity score)."""
-    fusion_risk = int(holistic.get("fusion", {}).get("overall_risk_score", 50))
-    risk_score = 100 - fusion_risk
-    route_taken, decision = _decide(risk_score)
-    reasons = [f["evidence"] for f in holistic.get("fusion", {}).get("top_flags", [])]
+_DECISION_RANK = {"auto_approve": 1, "human_review": 2, "auto_reject": 3}
+_ROUTE_FOR = {
+    "auto_approve": "route_1",
+    "human_review": "route_2",
+    "auto_reject": "route_3",
+}
+
+
+def _overall_from_documents(
+    documents_out: list[dict[str, Any]],
+    cross_signals: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Derive the application-level verdict from the per-document results.
+
+    The overall must never look rosier than the worst document, so we take the
+    weakest-link authenticity across documents and escalate for cross-document
+    fraud (which no single document reveals). This keeps the hero verdict and the
+    document cards from contradicting each other.
+    """
+    if not documents_out:
+        return {
+            "risk_score": 50,
+            "route_taken": "route_2",
+            "decision": "human_review",
+            "reasons": ["No documents could be verified."],
+        }
+
+    min_auth = min(int(d.get("risk_score", 50)) for d in documents_out)
+
+    # Cross-document inconsistency is itself a fraud signal not visible per-doc.
+    severities = {c.get("severity") for c in cross_signals}
+    if "high" in severities:
+        min_auth = min(min_auth, 40)
+    elif "medium" in severities:
+        min_auth = min(min_auth, 70)
+
+    route_taken, decision = _decide(min_auth)
+
+    # Never less severe than the worst individual document decision.
+    worst = max(documents_out, key=lambda d: _DECISION_RANK.get(d.get("decision"), 2))
+    if _DECISION_RANK.get(worst.get("decision"), 2) > _DECISION_RANK.get(decision, 2):
+        decision = worst["decision"]
+        route_taken = _ROUTE_FOR[decision]
+
+    reasons: list[str] = [
+        f"{c['label']}: {c['reason']}" if c.get("reason") else c["label"]
+        for c in cross_signals
+    ]
+    reasons += worst.get("reasons", []) or []
     if not reasons:
-        reasons = [holistic.get("fusion", {}).get("rationale", "No specific flags raised.")]
+        reasons = ["All documents are consistent with issuer records of authority."]
+
     return {
-        "risk_score": risk_score,
+        "risk_score": min_auth,
         "route_taken": route_taken,
         "decision": decision,
-        "reasons": reasons,
+        "reasons": reasons[:5],
     }
 
 
@@ -129,7 +172,7 @@ def _process_one(doc: BatchDocument) -> dict[str, Any]:
                 "heatmap_url": None,
                 "field_verification": {
                     "status": "unverifiable",
-                    "issuer": "mock_registry",
+                    "issuer": "Internal Registry",
                     "matched_fields": [],
                 },
                 "extracted_fields": {},
@@ -173,22 +216,12 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
             )
             cross_signals = _map_cross(cross_report)
 
-        # 3. Overall fusion across all documents (+ cross-doc).
+        # 3. Overall verdict: weakest-link across the per-document results (which
+        #    already fuse content + forensics), escalated for cross-document
+        #    fraud. Derived from the SAME per-doc verdicts shown on the cards, so
+        #    the hero verdict can never contradict the document cards.
         jobs.update(job_id, progress=94)
-        if verification_reports:
-            overall_holistic = p2_fusion.fuse_reports(
-                verification_reports,
-                {"per_document_forensics": "see individual documents"},
-                cross_report,
-            )
-            overall = _overall_from_holistic(overall_holistic)
-        else:
-            overall = {
-                "risk_score": 50,
-                "route_taken": "route_2",
-                "decision": "human_review",
-                "reasons": ["No documents could be verified."],
-            }
+        overall = _overall_from_documents(documents_out, cross_signals)
 
         jobs.update(
             job_id,
@@ -223,7 +256,10 @@ def create_batch(req: BatchVerifyRequest) -> BatchJobResponse:
 
 
 @router.get("/{job_id}")
-def get_batch(job_id: str) -> dict[str, Any]:
+def get_batch(job_id: str, response: Response) -> dict[str, Any]:
+    # Polled every ~600ms; must never be cached or the client can replay a stale
+    # "processing" body and hang at 100% after the job is already "done".
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     job = jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Unknown job id.")

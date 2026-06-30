@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------------------
-// VeriChain UI data model — the shape both the mock and real clients return to
-// the React app. This is the app's INTERNAL contract, intentionally richer than
-// the backend's frozen HTTP contract (multi-document, async job model).
+// VeriChain UI data model — the shape the client returns to the React app.
+// This is the app's INTERNAL contract, intentionally richer than the backend's
+// frozen HTTP contract (multi-document, async job model).
 //
-// The mock client produces this shape directly. The real client (realClient.ts)
-// adapts the frozen backend /verify contract into this shape via adapter.ts —
-// see adapter.ts for the wire-level backend types and the mapping.
+// The client (realClient.ts) adapts the backend's batch contract into this
+// shape via adapter.ts — see adapter.ts for the wire-level backend types and
+// the mapping.
 // ---------------------------------------------------------------------------
 
 export type Verdict = "genuine" | "review" | "high_risk";
@@ -71,14 +71,18 @@ export interface DocumentResult {
   filename: string;
   doc_type: DocType;
   thumbnail_url: string | null;
-  risk_score: number;
+  /** Object URL of the actual uploaded file (image or PDF) for full preview. */
+  preview_url?: string | null;
+  /** Trust / authenticity score, 0–100. HIGHER = more genuine. */
+  trust_score: number;
   verdict: Verdict;
   pipeline1: Pipeline1Report;
   pipeline2: Pipeline2Report;
 }
 
 export interface OverallResult {
-  risk_score: number;
+  /** Trust / authenticity score, 0–100. HIGHER = more genuine. */
+  trust_score: number;
   verdict: Verdict;
   confidence: number; // 0–1
   summary: string;
@@ -128,10 +132,10 @@ export interface HistoryItem {
   submitted_at: string;
   document_count: number;
   verdict: Verdict;
-  risk_score: number;
+  trust_score: number;
 }
 
-/** The single interface both the mock and real clients implement. */
+/** The interface the API client implements. */
 export interface VeriChainApi {
   submit(options: SubmitOptions): Promise<SubmitResponse>;
   getStatus(jobId: string): Promise<JobStatusResponse>;

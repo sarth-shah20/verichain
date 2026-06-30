@@ -1,6 +1,7 @@
 # Core
-litellm>=1.40.0          # unified LLM client (routes to Vertex AI)
-google-cloud-aiplatform  # Vertex AI backend used by litellm
+litellm>=1.40.0          # unified, provider-agnostic model client
+# Install your model provider's SDK separately (kept out of source so the
+# provider is not disclosed here) — whatever your configured LLM_MODEL requires.
 
 # Optional but recommended
 pymupdf>=1.24.0          # rasterise PDF pages to images (utils.load_media)

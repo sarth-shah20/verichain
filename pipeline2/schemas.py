@@ -203,6 +203,27 @@ SCHEMAS: dict[str, dict[str, Any]] = {
         ],
     },
     # --------------------------- Property / Land --------------------------- #
+    "land_record": {
+        "label": "Land Record (7/12 · RTC · Patta-Chitta)",
+        "db_collection": "land_record",
+        "key_fields": ["state", "district", "taluka", "village", "survey_number"],
+        "fields": {
+            "state": "state the land is in (e.g. Karnataka, Maharashtra, Tamil Nadu)",
+            "district": "district name (null if not printed)",
+            "taluka": "taluka / taluk / tehsil",
+            "village": "village name",
+            "survey_number": "survey / gat number exactly as printed, keep sub-numbers like 102/3",
+            "owner_name": "primary owner / khatedar name as printed",
+            "area_hectare": "land area in hectares as a number",
+            "parcel_id": "unique parcel/land id (Bhoomi ID, ULPIN, PID) if present, else null",
+            "encumbrance": "any loan / charge / encumbrance text if present, else null",
+        },
+        "forgery_hints": [
+            "Edited owner / khatedar name (ownership fraud)",
+            "Altered area or survey number",
+            "Manipulated encumbrance entries to hide existing loans/charges",
+        ],
+    },
     "plan_approval": {
         "label": "Building Plan Approval",
         "db_collection": "plan_approval",

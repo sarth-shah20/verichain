@@ -1,7 +1,5 @@
-import { Moon, Sun, Server, FlaskConical, CircleUserRound } from "lucide-react";
+import { Moon, Sun, Server, CircleUserRound } from "lucide-react";
 import { useTheme } from "@/app/theme";
-import { USE_MOCK } from "@/api";
-import { cx } from "@/lib/format";
 
 export function Settings() {
   const { theme, toggle } = useTheme();
@@ -72,38 +70,15 @@ export function Settings() {
         <div className="mt-4 space-y-3">
           <div className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3 dark:bg-slate-800/60">
             <span className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
-              {USE_MOCK ? (
-                <FlaskConical className="h-4 w-4 text-pipeline2" />
-              ) : (
-                <Server className="h-4 w-4 text-pipeline1" />
-              )}
-              Data source
+              <Server className="h-4 w-4 text-pipeline1" />
+              Connected backend
             </span>
-            <span
-              className={cx(
-                "rounded-full px-2.5 py-0.5 text-xs font-semibold",
-                USE_MOCK
-                  ? "bg-indigo-100 text-pipeline2 dark:bg-pipeline2-softdark dark:text-indigo-200"
-                  : "bg-teal-100 text-pipeline1 dark:bg-pipeline1-softdark dark:text-teal-200"
-              )}
-            >
-              {USE_MOCK ? "Mock data" : "Live backend"}
-            </span>
+            <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs dark:bg-slate-800">
+              {apiBase}
+            </code>
           </div>
-          {!USE_MOCK && (
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              Connected to{" "}
-              <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs dark:bg-slate-800">
-                {apiBase}
-              </code>
-            </p>
-          )}
           <p className="text-xs text-slate-400">
-            Switch by setting{" "}
-            <code className="rounded bg-slate-100 px-1 py-0.5 dark:bg-slate-800">
-              VITE_USE_MOCK=false
-            </code>{" "}
-            and{" "}
+            Point the app at a different host by setting{" "}
             <code className="rounded bg-slate-100 px-1 py-0.5 dark:bg-slate-800">
               VITE_API_BASE_URL
             </code>{" "}

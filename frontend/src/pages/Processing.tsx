@@ -37,16 +37,30 @@ export function Processing() {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<number | null>(null);
+  const targetRef = useRef(0);
+
+  // Ease the displayed % toward a moving target so the bar never freezes at 0
+  // during the long LLM step, nor snaps straight from 0 to 100.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setProgress((p) => {
+        const target = targetRef.current;
+        if (p >= target) return p;
+        return Math.min(target, p + Math.max(0.5, (target - p) * 0.12));
+      });
+    }, 80);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (!jobId) return;
     let cancelled = false;
+    targetRef.current = 0;
 
     const poll = async () => {
       try {
         const status = await api.getStatus(jobId);
         if (cancelled) return;
-        setProgress(status.progress);
 
         if (status.status === "error") {
           setError("The verification job could not be completed.");
@@ -54,12 +68,18 @@ export function Processing() {
         }
         if (status.status === "done" && status.result) {
           setCurrent(jobId, status.result);
-          setProgress(100);
+          targetRef.current = 100;
           window.setTimeout(() => {
             if (!cancelled) navigate(`/results/${jobId}`, { replace: true });
-          }, 500);
+          }, 650);
           return;
         }
+        // Honour real server progress, but also creep forward (capped) so the
+        // bar keeps moving while a single document's pipeline is still running.
+        targetRef.current = Math.min(
+          92,
+          Math.max(status.progress, targetRef.current + 7)
+        );
         timer.current = window.setTimeout(poll, 600);
       } catch {
         if (!cancelled) setError("Lost connection to the verification service.");
@@ -72,6 +92,8 @@ export function Processing() {
       if (timer.current) window.clearTimeout(timer.current);
     };
   }, [jobId, navigate, setCurrent]);
+
+  const shownProgress = Math.round(progress);
 
   if (error) {
     return (
@@ -102,12 +124,12 @@ export function Processing() {
           <span className="font-semibold text-slate-700 dark:text-slate-200">
             Overall progress
           </span>
-          <span className="tnum font-bold text-pipeline1">{progress}%</span>
+          <span className="tnum font-bold text-pipeline1">{shownProgress}%</span>
         </div>
         <div
           className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"
           role="progressbar"
-          aria-valuenow={progress}
+          aria-valuenow={shownProgress}
           aria-valuemin={0}
           aria-valuemax={100}
         >

@@ -1,19 +1,20 @@
 """
 Central configuration for Pipeline 2 (content extraction + verification).
 
-All LLM access goes through litellm. We target Google Vertex AI.
-The model name is read from the environment so it is never hard-coded and can
-be swapped without touching application logic.
+All model access goes through a single client wrapper. The model id and any
+provider credentials are read from the environment so they are never hard-coded
+and the underlying provider can be swapped without touching application logic.
 
-Required environment variables (Vertex AI):
-    LLM_MODEL            e.g. "vertex_ai/<model-id>"   (kept out of source on purpose)
-    VERTEXAI_PROJECT     your GCP project id
-    VERTEXAI_LOCATION    e.g. "us-central1"
-    GOOGLE_APPLICATION_CREDENTIALS  path to the service-account JSON
+Required environment variable:
+    LLM_MODEL            the model id to use (kept out of source on purpose)
 
 Optional:
-    LLM_MOCK=1           run everything with a deterministic fake LLM (no network)
     LLM_TEMPERATURE      default 0.0 (we want deterministic extraction/verification)
+    LLM_TIMEOUT          per-call timeout in seconds (default 120)
+    LLM_MAX_TOKENS       max response tokens (default 8192)
+
+Any additional provider credentials are picked up automatically from the
+environment by the client wrapper; they are intentionally not referenced here.
 """
 
 from __future__ import annotations
@@ -25,8 +26,10 @@ def get_model() -> str:
     """Return the configured model id (from env). Never hard-code it here."""
     model = os.getenv("LLM_MODEL")
     if not model:
-        # Sensible Vertex default if the operator forgot to set it.
-        model = "vertex_ai/gemini-pro"
+        raise RuntimeError(
+            "LLM_MODEL is not set. Configure the model id in the environment "
+            "before running the pipeline."
+        )
     return model
 
 
@@ -37,16 +40,7 @@ def get_temperature() -> float:
         return 0.0
 
 
-def is_mock() -> bool:
-    """Mock mode lets the full flow run end-to-end without live Vertex calls."""
-    return os.getenv("LLM_MOCK", "").strip() in ("1", "true", "True", "yes")
-
-
-# Vertex routing is picked up automatically by litellm from these env vars.
-VERTEX_PROJECT = os.getenv("VERTEXAI_PROJECT")
-VERTEX_LOCATION = os.getenv("VERTEXAI_LOCATION", "us-central1")
-
-# How long (seconds) to wait on a single LLM call before giving up.
+# How long (seconds) to wait on a single model call before giving up.
 LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "120"))
 
 # Max tokens for a response. Verification of records with many fields can be

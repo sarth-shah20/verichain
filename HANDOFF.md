@@ -24,12 +24,11 @@ Frontend (React)  ──►  Backend FastAPI  ──►  Pipeline 1 (forensics)
 
 - **Backend** serves the frozen single-doc `POST /verify` **and** a new async,
   multi-document `POST /verify/batch` (+ `GET /verify/batch/{job_id}` polling).
-- **Frontend** talks to the real backend via an adapter layer; also runs fully
-  on built-in mock data with a one-line env toggle.
+- **Frontend** talks to the live backend via an adapter layer.
 - Everything **builds and typechecks**; single-doc and batch flows were tested
-  live against the backend in mock-LLM mode.
-- It has **only been exercised with `LLM_MOCK=1`** (deterministic fake LLM). The
-  real per-document fraud verdicts need a real LLM configured — see §6.
+  live against the backend.
+- A model must be configured via `LLM_MODEL` (provider credentials read from the
+  environment) — see §6.
 
 ---
 
@@ -84,21 +83,20 @@ backend/
     batch.py         POST /verify/batch, GET /verify/batch/{id}        [NEW]
 pipeline2/           content extraction + DB verify + fusion + cross-doc
   pipeline.py        verify_document_file() — extract → DB fetch → verify
-  extract.py         VLM/OCR extraction (mock or real LLM)
+  extract.py         VLM/OCR extraction
   verify.py          field-by-field comparison vs authoritative record
   discrepancy.py     cross-document consistency (used by batch)
   fusion.py          merges verification + forensics → holistic risk
   db.py              authoritative-DB adapter (reads verichain.db)     [MODIFIED]
-  llm_client.py      litellm wrapper + deterministic MOCK responses    [MODIFIED]
-  config.py          LLM env config; is_mock()
+  llm_client.py      model client wrapper (text + vision) + JSON parsing
+  config.py          model env config (model id + tuning, from env)
 ai/                  Pipeline 1 forensics (classify → tier0/1/2)
 frontend/            React + Vite + TS + Tailwind                      [NEW]
   src/api/
     types.ts         UI data model (internal contract)
     adapter.ts       backend wire types + backend→UI mapping           [NEW]
     realClient.ts    drives /verify/batch (async job + poll)           [NEW]
-    mock/            built-in offline mock data + client
-    index.ts         mock/real switch (VITE_USE_MOCK)
+    index.ts         exposes the API client (talks to the live backend)
 init_db.py           builds verichain.db from extracted/*.json         [NEW]
 mock_data/           the 5 demo applicant documents (committed)
 verichain.db         the authoritative mock DB (gitignored — see §8)
@@ -134,7 +132,7 @@ Response:
   "heatmap_url": "string | null",
   "field_verification": {
     "status": "verified | mismatch | unverifiable",
-    "issuer": "CBDT | CERSAI | mock_registry",
+    "issuer": "CBDT | CERSAI | Internal Registry",
     "matched_fields": ["pan", "gross_total_income"]
   }
 }
@@ -254,38 +252,30 @@ Response: `{ "job_id": "job_abc123" }`
 
 ## 6. How to run
 
-### Backend (mock LLM — no credentials, deterministic)
+### Backend
+A model must be configured (the extractor uses vision, so the model must accept
+image/PDF input). The model id and any provider credentials are read from the
+environment — nothing is hard-coded.
 ```bash
 cd backend
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-# from repo root the DB is ../verichain.db
-VERICHAIN_DB=../verichain.db LLM_MOCK=1 uvicorn main:app --reload
-# → http://localhost:8000  (docs at /docs)
-```
+# plus the SDK your configured model requires (see requirements.txt note)
 
-### Backend (real LLM — needed for true fraud detection)
-Mock mode returns canned data regardless of file contents, so tampered docs are
-NOT actually detected under `LLM_MOCK=1`. For real verdicts, drop the flag and
-configure litellm (defaults to Google Vertex/Gemini; any litellm provider works
-by changing `LLM_MODEL` + creds — the extractor uses vision, so the model must
-accept image/PDF input):
-```bash
-export LLM_MODEL="vertex_ai/gemini-2.0-flash"
-export VERTEXAI_PROJECT="your-gcp-project"
-export VERTEXAI_LOCATION="us-central1"
-export GOOGLE_APPLICATION_CREDENTIALS="/path/to/sa.json"
-cd backend && VERICHAIN_DB=../verichain.db uvicorn main:app --reload
+export LLM_MODEL="<your-model-id>"   # kept out of source
+# any provider credentials your model needs are read from the environment
+
+# from backend/ the DB is ../verichain.db
+VERICHAIN_DB=../verichain.db uvicorn main:app --reload
+# → http://localhost:8000  (docs at /docs)
 ```
 
 ### Frontend
 ```bash
 cd frontend
 npm install
-npm run dev            # → http://localhost:5173  (mock data by default)
-# to hit the live backend:
-cp .env.example .env.local   # sets VITE_USE_MOCK=false + VITE_API_BASE_URL
-npm run dev
+cp .env.example .env.local   # sets VITE_API_BASE_URL
+npm run dev                  # → http://localhost:5173
 ```
 (Backend CORS already allows `http://localhost:5173`.)
 
