@@ -214,7 +214,7 @@ SCHEMAS: dict[str, dict[str, Any]] = {
             "village": "village name",
             "survey_number": "survey / gat number exactly as printed, keep sub-numbers like 102/3",
             "owner_name": "primary owner / khatedar name as printed",
-            "area_hectare": "land area in hectares as a number",
+            "area_hectare": "the named owner's HOLDING area in hectares (the khatedar's share), NOT the total survey/parcel area — on a 7/12 read the owner's portion, not the gross parcel area",
             "parcel_id": "unique parcel/land id (Bhoomi ID, ULPIN, PID) if present, else null",
             "encumbrance": "any loan / charge / encumbrance text if present, else null",
         },
