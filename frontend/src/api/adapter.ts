@@ -20,6 +20,7 @@ import type {
   DocumentResult,
   ExtractedField,
   OverallResult,
+  RevisionEvidence,
   Severity,
   Signal,
   SignalFamily,
@@ -39,6 +40,22 @@ export interface BackendFieldVerification {
   matched_fields: string[];
 }
 
+export interface BackendRevisionChange {
+  field_hint: string | null;
+  original_value: string;
+  current_value: string;
+  kind: string;
+  weight: string;
+  page_number: number;
+  bbox: [number, number, number, number] | null;
+}
+
+export interface BackendRevisionEvidence {
+  detected: boolean;
+  summary: string | null;
+  changes: BackendRevisionChange[];
+}
+
 export interface BackendVerifyResponse {
   /** AUTHENTICITY score, 0–100 (higher = more genuine). */
   risk_score: number;
@@ -48,6 +65,8 @@ export interface BackendVerifyResponse {
   blockchain_tx: string;
   heatmap_url: string | null;
   field_verification: BackendFieldVerification;
+  /** Additive (batch only): recovered before/after PDF-revision evidence. */
+  revision_evidence?: BackendRevisionEvidence | null;
 }
 
 export interface BackendHistoryEvent {
@@ -275,6 +294,41 @@ function mapDocument(input: DocInput, apiBase: string): DocumentResult {
     });
   }
 
+  // Recovered before/after PDF-revision evidence (the killer edited-PDF signal).
+  const revisionEvidence: RevisionEvidence | null =
+    resp.revision_evidence && resp.revision_evidence.detected
+      ? {
+          detected: true,
+          summary: resp.revision_evidence.summary ?? null,
+          changes: (resp.revision_evidence.changes ?? []).map((c) => ({
+            field_hint: c.field_hint ?? null,
+            original_value: c.original_value,
+            current_value: c.current_value,
+            kind: (["identifier", "amount", "date", "name", "text"].includes(c.kind)
+              ? c.kind
+              : "text") as RevisionEvidence["changes"][number]["kind"],
+            weight: (["high", "medium", "low"].includes(c.weight)
+              ? c.weight
+              : "low") as RevisionEvidence["changes"][number]["weight"],
+            page_number: c.page_number ?? 0,
+            bbox: c.bbox ?? null,
+          })),
+        }
+      : null;
+
+  if (revisionEvidence) {
+    for (const c of revisionEvidence.changes) {
+      const hint = c.field_hint ? `${c.field_hint} — ` : "";
+      p1Signals.unshift({
+        family: "structure",
+        label: "Edited PDF revision recovered",
+        severity: c.weight === "high" ? "high" : "medium",
+        reason: `${hint}original: ${c.original_value} → edited: ${c.current_value}. The prior revision is still embedded in the PDF (incremental-update edit).`,
+        region: null,
+      });
+    }
+  }
+
   // Extracted-fields table. The async batch endpoint returns real extracted
   // VALUES, so prefer those; fall back to matched field names otherwise.
   const matched = new Set(resp.field_verification.matched_fields ?? []);
@@ -319,6 +373,7 @@ function mapDocument(input: DocInput, apiBase: string): DocumentResult {
       extracted_fields: extracted,
       signals: p2Signals,
     },
+    revision_evidence: revisionEvidence,
   };
 }
 

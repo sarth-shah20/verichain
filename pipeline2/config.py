@@ -43,6 +43,7 @@ def get_temperature() -> float:
 # How long (seconds) to wait on a single model call before giving up.
 LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "120"))
 
-# Max tokens for a response. Verification of records with many fields can be
-# long, so keep this generous to avoid truncated JSON.
-LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8192"))
+# Max tokens for a response. Extraction now returns the FULL document content
+# (full_text) and verification echoes field-by-field over the whole document, so
+# responses are larger — keep this generous to avoid truncated JSON.
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "16384"))

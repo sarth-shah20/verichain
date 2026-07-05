@@ -78,6 +78,8 @@ def verify_document_file(
         },
         "extraction": {
             "fields": extraction.get("fields", {}),
+            "full_text": extraction.get("full_text"),
+            "language": extraction.get("language"),
             "normalization_notes": extraction.get("normalization_notes", []),
             "extraction_observations": extraction.get("extraction_observations", []),
             "unreadable_fields": extraction.get("unreadable_fields", []),

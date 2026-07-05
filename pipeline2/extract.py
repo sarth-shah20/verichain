@@ -1,9 +1,17 @@
 """
-Step 1 of Pipeline 2: VLM/OCR + normalization in a single LLM session.
+Step 1 of Pipeline 2: full-content extraction.
 
-The model reads the document image(s)/PDF, performs OCR, translates any
-regional-language content to English, expands abbreviations, and returns the
-fields defined by the document's schema as clean structured JSON.
+Two passes:
+  1. VISION — OCR the whole document, translate any regional script to English,
+     and return the COMPLETE document content as `full_text` (tables, co-owners,
+     every section — nothing summarised away), plus the document type.
+  2. DERIVE — from that English `full_text`, pull the schema's declared fields
+     (used as the DB lookup key and by the deterministic identifier validators).
+
+Downstream, verification compares the WHOLE document content against the
+authoritative record, not just a handful of essential fields — so context like
+joint owners, father-name suffixes and full tables is preserved and benign
+variance stops being misread as a mismatch.
 """
 
 from __future__ import annotations
@@ -14,101 +22,201 @@ import llm_client
 import schemas
 import utils
 
-_EXTRACT_SYSTEM = """You are a meticulous document-understanding engine for a bank's
-loan-underwriting pipeline.
+# --------------------------------------------------------------------------- #
+# Pass 1: full-content OCR + translation
+# --------------------------------------------------------------------------- #
+_FULLTEXT_SYSTEM = """You are a meticulous document-understanding engine for a
+bank's loan-underwriting pipeline.
 
-Your job, in ONE pass over the supplied document image(s)/PDF:
-1. OCR: read ALL text, including stamps, seals, handwriting and tables.
-2. NORMALIZE: translate any non-English (Hindi, Kannada, Tamil, etc.) labels and
-   values into English. Expand abbreviations (e.g. "A.Y." -> assessment_year,
-   "Rs." -> currency amount, "S/o" -> son of). Convert dates to YYYY-MM-DD and
-   amounts to plain integers/decimals without currency symbols or separators.
-3. EXTRACT: populate exactly the requested fields. If a field is absent or
-   unreadable, set it to null and list it under "unreadable_fields".
+In ONE pass over the supplied document image(s)/PDF:
+1. OCR: read ALL text — headings, stamps, seals, handwriting, and EVERY table
+   row (crop/tenancy tables, transaction lines, co-owner lists, etc.).
+2. TRANSLATE: render any non-English content (Hindi, Kannada, Tamil, Marathi,
+   etc.) into English. Expand abbreviations ("A.Y." -> assessment year, "S/o" ->
+   son of). Keep names in their printed form.
+3. RETURN the COMPLETE content as a single English string in "full_text". Do NOT
+   summarise, omit rows, or drop sections — preserve the whole document,
+   including every owner/khatedar name and every table line, in reading order.
+4. CLASSIFY the document type.
 
 Rules:
-- Never guess or fabricate values. Only report what is actually present.
-- Preserve names in their printed form (uppercase as printed is fine).
-- For Aadhaar, output ONLY the last 4 digits, never the full number.
-- IGNORE informational watermarks/disclaimers such as "FOR VIEWING ONLY",
-  "NOT FOR LEGAL PURPOSE", "INFORMATIONAL COPY", or e-portal download notices.
-  These appear on legitimately downloaded government e-record copies and are NOT
-  tampering — do NOT list them under "extraction_observations".
-- BE CONCISE so the JSON is never truncated: return ONLY the requested fields.
-  Do NOT transcribe full crop/tenancy tables or every row. Keep
-  "normalization_notes" and "extraction_observations" to at most 3 SHORT items
-  each (or leave them empty) — one brief phrase per item, not paragraphs.
-- Return STRICT, COMPACT JSON. No prose, no markdown."""
+- Never fabricate. Transcribe only what is present.
+- IGNORE informational watermarks/disclaimers ("FOR VIEWING ONLY", "NOT FOR
+  LEGAL PURPOSE", "INFORMATIONAL COPY", e-portal download notices) — these are
+  normal on downloaded government e-records and are NOT tampering.
+- Return STRICT JSON. No markdown, no prose outside the JSON."""
 
 _CLASSIFY_LINE = (
-    "First, classify this document. Choose the single best matching type from "
-    "this list (or 'unknown' if none fit): {types}. "
-    "Put your choice in the top-level \"doc_type\" field."
+    "Classify this document as the single best matching type from this list "
+    "(or 'unknown' if none fit): {types}."
 )
 
 
-def _build_user_prompt(schema: dict[str, Any], doc_type: str | None) -> str:
+def _build_fulltext_prompt(doc_type: str | None) -> str:
+    if doc_type is None:
+        classify = _CLASSIFY_LINE.format(types=", ".join(schemas.known_types()))
+    else:
+        classify = f"Expected document type: {doc_type}."
+    return f"""{classify}
+
+Read the ENTIRE document and return JSON with this exact shape:
+{{
+  "doc_type": "<one of the known types or 'unknown'>",
+  "language": "<primary language of the source document, e.g. English, Tamil>",
+  "full_text": "<the COMPLETE document content, OCR'd and translated to English, preserving every section, table row and owner name>"
+}}"""
+
+
+# --------------------------------------------------------------------------- #
+# Pass 2: derive the schema's declared fields from the English full_text
+# --------------------------------------------------------------------------- #
+_DERIVE_SYSTEM = """You extract structured fields from a document's already-OCR'd,
+English text for a bank pipeline.
+
+Rules:
+- Use ONLY the provided text. Never guess or fabricate; if a field is absent, set
+  it to null and list its name under "unreadable_fields".
+- Convert dates to YYYY-MM-DD and amounts to plain numbers (no currency symbols
+  or thousands separators).
+- For Aadhaar: "aadhaar_number" is the FULL 12-digit number (digits only) and
+  "aadhaar_last4" is its last four digits.
+- If a field has several values in the document (e.g. multiple owners), return
+  them all, comma-separated, in reading order.
+- Return STRICT JSON only."""
+
+
+def _build_derive_prompt(schema: dict[str, Any], full_text: str) -> str:
     field_lines = "\n".join(
         f'  - "{name}": {desc}' for name, desc in schema["fields"].items()
     )
-    hints = "\n".join(f"  - {h}" for h in schema.get("forgery_hints", []))
+    return f"""Document type: {schema.get("label", "Document")}
 
-    classify = ""
-    if doc_type is None:
-        classify = _CLASSIFY_LINE.format(types=", ".join(schemas.known_types())) + "\n\n"
+Full document content (English):
+\"\"\"
+{full_text}
+\"\"\"
 
-    return f"""{classify}Document type (expected): {doc_type or "auto-detect"}
-
-Extract these fields:
+Extract these fields from the text above:
 {field_lines}
-
-Be alert to these known tampering patterns for this document type (note any you
-visibly observe under "extraction_observations", but do NOT score risk here):
-{hints or "  - (none listed)"}
 
 Return JSON with this exact shape:
 {{
-  "doc_type": "<one of the known types or 'unknown'>",
   "fields": {{ <each requested field>: <value or null> }},
-  "normalization_notes": [ "<what you translated/expanded>" ],
-  "extraction_observations": [ "<any visible anomaly, optional>" ],
-  "unreadable_fields": [ "<field names that were unreadable>" ],
+  "unreadable_fields": [ "<field names not found in the text>" ],
   "extraction_confidence": <0.0-1.0>
 }}"""
 
 
+# --------------------------------------------------------------------------- #
+# Coercion helpers (models sometimes return arrays / flat keys)
+# --------------------------------------------------------------------------- #
+def _coerce_fulltext(result: Any) -> dict[str, Any]:
+    """Normalize the pass-1 response into {doc_type, language, full_text}."""
+    if isinstance(result, list):
+        result = next((x for x in result if isinstance(x, dict)), {})
+    if not isinstance(result, dict):
+        result = {}
+    full_text = result.get("full_text")
+    if isinstance(full_text, list):
+        full_text = "\n".join(str(x) for x in full_text)
+    if not isinstance(full_text, str):
+        full_text = "" if full_text is None else str(full_text)
+    return {
+        "doc_type": result.get("doc_type"),
+        "language": result.get("language"),
+        "full_text": full_text,
+    }
+
+
+def _coerce_fields(result: Any, schema: dict[str, Any]) -> dict[str, Any]:
+    """Normalize the pass-2 response into a dict with a "fields" dict.
+
+    Handles a top-level array, a fields-as-list-of-fragments, and the model
+    emitting the schema fields flat at the top level.
+    """
+    if isinstance(result, list):
+        result = next((x for x in result if isinstance(x, dict)), {})
+    if not isinstance(result, dict):
+        result = {}
+
+    fields = result.get("fields")
+    if isinstance(fields, list):
+        merged: dict[str, Any] = {}
+        for item in fields:
+            if isinstance(item, dict):
+                merged.update(item)
+        fields = merged
+    if not isinstance(fields, dict):
+        fields = {}
+
+    if not fields:  # model put fields flat at the top level
+        schema_field_names = set(schema.get("fields", {}).keys())
+        salvaged = {
+            k: v for k, v in result.items()
+            if k in schema_field_names and not k.startswith("_")
+        }
+        if salvaged:
+            fields = salvaged
+
+    result["fields"] = fields
+    return result
+
+
+# --------------------------------------------------------------------------- #
+# Orchestration
+# --------------------------------------------------------------------------- #
 def extract_document(path: str, doc_type: str | None = None) -> dict[str, Any]:
     """
-    Read a document and return normalized structured fields.
+    Read a document → full English content → derived schema fields.
 
     Args:
         path: path to an image or PDF.
         doc_type: optional known type. If None, the model classifies it.
 
-    Returns a dict including doc_type, fields, normalization_notes, and the
-    schema used (for downstream verification).
+    Returns a dict with doc_type, language, full_text, fields, and the schema
+    used (for downstream DB lookup + verification).
     """
-    schema = schemas.get_schema(doc_type)
     media = utils.load_media(path)
-    user_prompt = _build_user_prompt(schema, doc_type)
 
-    result = llm_client.call_vision(_EXTRACT_SYSTEM, user_prompt, media, json_mode=True)
-
-    # Auto-detect refinement: on the first pass we only had the GENERIC schema's
-    # fields (name/title/ids/amounts), so the type-specific KEY fields (e.g. a
-    # land record's state/taluka/village/survey_number) were never pulled and the
-    # DB lookup can't succeed. If the model identified a known specific type,
-    # re-extract with THAT schema's real fields so verification gets proper keys.
-    detected = result.get("doc_type")
-    if doc_type is None and detected and detected in schemas.SCHEMAS and detected != "unknown":
-        schema = schemas.get_schema(detected)
-        result = llm_client.call_vision(
-            _EXTRACT_SYSTEM, _build_user_prompt(schema, detected), media, json_mode=True
+    # Pass 1 — full content + classification (no length cap; preserve everything).
+    fulltext = _coerce_fulltext(
+        llm_client.call_vision(
+            _FULLTEXT_SYSTEM, _build_fulltext_prompt(doc_type), media, json_mode=True
         )
-        detected = result.get("doc_type") or detected
+    )
+    detected = fulltext.get("doc_type")
+    resolved_type = (
+        detected if (doc_type is None and detected in schemas.SCHEMAS and detected != "unknown")
+        else doc_type
+    )
+    schema = schemas.get_schema(resolved_type)
+    full_text = fulltext["full_text"]
 
+    # Pass 2 — derive the schema's declared fields FROM the full English text.
+    # Runs as a text call (cheaper, and judges the content the pipeline will
+    # actually compare). Skipped only if pass 1 recovered no text at all.
+    if full_text.strip():
+        derived = _coerce_fields(
+            llm_client.call_text(
+                _DERIVE_SYSTEM, _build_derive_prompt(schema, full_text), json_mode=True
+            ),
+            schema,
+        )
+    else:
+        derived = {"fields": {}, "unreadable_fields": list(schema["fields"].keys())}
+
+    result: dict[str, Any] = {
+        "doc_type": resolved_type or detected or "unknown",
+        "language": fulltext.get("language"),
+        "full_text": full_text,
+        "fields": derived.get("fields", {}),
+        "unreadable_fields": derived.get("unreadable_fields", []),
+        "extraction_confidence": derived.get("extraction_confidence"),
+        "normalization_notes": [],
+        "extraction_observations": [],
+    }
     result["_schema"] = {
-        "doc_type": detected or doc_type or "unknown",
+        "doc_type": result["doc_type"],
         "db_collection": schema["db_collection"],
         "key_fields": schema["key_fields"],
         "label": schema["label"],

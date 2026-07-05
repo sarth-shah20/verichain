@@ -38,7 +38,8 @@ SCHEMAS: dict[str, dict[str, Any]] = {
         "db_collection": "aadhaar",
         "key_fields": ["aadhaar_last4", "name"],
         "fields": {
-            "aadhaar_last4": "last 4 digits only (never store full Aadhaar)",
+            "aadhaar_number": "full 12-digit Aadhaar number, digits only (needed for the Verhoeff checksum validation)",
+            "aadhaar_last4": "last 4 digits of the Aadhaar number",
             "name": "name as printed",
             "date_of_birth": "DOB (YYYY-MM-DD)",
             "gender": "gender",

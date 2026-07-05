@@ -227,8 +227,61 @@ def _log_blockchain(applicant_id: str, doc_hash: str, risk_score: int, decision:
     return tx_hash
 
 
+def _extract_revision_evidence(forensics_report: dict) -> dict[str, Any] | None:
+    """Pull the recovered before/after PDF-revision artifact out of Pipeline 1.
+
+    Tier 1 stores it under evidence.revision_recovery. We surface a compact,
+    UI-ready structure ONLY when a material field edit was recovered, so benign
+    re-saves never produce a before/after panel.
+    """
+    for tier in forensics_report.get("tiers", []) or []:
+        rr = (tier.get("evidence") or {}).get("revision_recovery")
+        if not rr or not rr.get("prior_revision_recovered"):
+            continue
+        changes = [
+            c for c in rr.get("recovered_changes", [])
+            if c.get("weight") in ("high", "medium")
+        ]
+        if not changes:
+            continue
+        return {
+            "detected": True,
+            "summary": rr.get("summary"),
+            "changes": [
+                {
+                    "field_hint": c.get("field_hint"),
+                    "original_value": c.get("original_value"),
+                    "current_value": c.get("current_value"),
+                    "kind": c.get("kind"),
+                    "weight": c.get("weight"),
+                    "page_number": c.get("page_number", 0),
+                    "bbox": c.get("bbox"),
+                }
+                for c in changes
+            ],
+        }
+    return None
+
+
+def _revision_reason_lines(revision_evidence: dict | None) -> list[str]:
+    """Ocrolus-style 'original → edited' lines for the frozen reasons[] list."""
+    if not revision_evidence:
+        return []
+    lines: list[str] = []
+    for c in revision_evidence.get("changes", []):
+        hint = f"{c['field_hint']} — " if c.get("field_hint") else ""
+        lines.append(
+            f"Edited PDF field recovered — {hint}original: "
+            f"{c['original_value']} → edited: {c['current_value']}"
+        )
+    return lines
+
+
 def _holistic_to_api(
-    holistic: dict, verification_report: dict, document_type: str
+    holistic: dict,
+    verification_report: dict,
+    document_type: str,
+    revision_evidence: dict | None = None,
 ) -> dict[str, Any]:
     """Map a fused holistic report → the frozen API fields (shared by the
     single-doc endpoint and the batch job).
@@ -247,10 +300,16 @@ def _holistic_to_api(
     if not reasons:
         reasons = [holistic.get("fusion", {}).get("rationale", "No specific flags raised.")]
 
+    # The recovered before/after value is the headline evidence for an edited PDF
+    # — surface it first, in both the frozen single-doc reasons[] and the batch.
+    revision_lines = _revision_reason_lines(revision_evidence)
+    if revision_lines:
+        reasons = revision_lines + [r for r in reasons if r not in revision_lines]
+
     field_ver = _field_verification(verification_report, document_type)
     extracted = verification_report.get("extraction", {}).get("fields", {}) or {}
 
-    return {
+    api = {
         "risk_score": risk_score,
         "route_taken": route_taken,
         "decision": decision,
@@ -259,6 +318,12 @@ def _holistic_to_api(
         "field_verification": field_ver.dict(),
         "extracted_fields": extracted,
     }
+    # Additive only — the frozen single-doc VerifyResponse ignores unknown keys;
+    # the batch job spreads `api` into its per-document result, so this surfaces
+    # the before/after panel there without touching the frozen schema.
+    if revision_evidence:
+        api["revision_evidence"] = revision_evidence
+    return api
 
 
 def process_document(file_bytes: bytes, document_type: str) -> dict[str, Any]:
@@ -286,11 +351,16 @@ def process_document(file_bytes: bytes, document_type: str) -> dict[str, Any]:
         except OSError:
             pass
 
+    revision_evidence = _extract_revision_evidence(forensics_report)
+
     return {
         "verification_report": verification_report,
         "forensics_report": forensics_report,
         "holistic": holistic,
-        "api": _holistic_to_api(holistic, verification_report, document_type),
+        "revision_evidence": revision_evidence,
+        "api": _holistic_to_api(
+            holistic, verification_report, document_type, revision_evidence
+        ),
         "doc_hash": hashlib.sha256(file_bytes).hexdigest(),
     }
 

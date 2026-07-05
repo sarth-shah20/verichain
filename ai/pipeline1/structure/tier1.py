@@ -20,6 +20,7 @@ from pipeline1.schema import (
 )
 from pipeline1.structure.exif_metadata import check_exif
 from pipeline1.structure.pdf_metadata import check_pdf_metadata
+from pipeline1.structure.revision_recovery import recover_revisions
 from pipeline1.structure.visual_typography import analyze_typography
 
 BORN_DIGITAL_TYPES = {"signed_pdf", "born_digital_pdf"}
@@ -60,6 +61,21 @@ def run_tier1(path: str | Path, classification: ClassificationResult) -> TierRes
         warnings.extend(pdf_result.warnings)
         if pdf_result.warnings:
             confidence = "medium"
+
+    # Revision recovery runs for ANY PDF (born-digital or scanned): the killer
+    # tamper artifact. It reconstructs the prior incremental-update revision and
+    # recovers the ORIGINAL value of any edited field, promoting incremental-
+    # update analysis from a bare metadata flag to first-class before/after
+    # evidence. Silent (no penalty) on single-revision or benign-resave PDFs.
+    if file_path.suffix.lower() == ".pdf":
+        try:
+            revision = recover_revisions(file_path)
+            evidence["revision_recovery"] = revision.model_dump()
+            rev_reasons, rev_penalty = _revision_reasons(revision)
+            reasons.extend(rev_reasons)
+            score -= rev_penalty
+        except Exception as exc:  # never let recovery sink the tier
+            warnings.append(f"revision recovery failed: {exc}")
 
     if classification.document_type == "scanned_image":
         typography_results, render_warnings = _analyze_scanned_document(file_path)
@@ -189,6 +205,41 @@ def _pdf_reasons(pdf_result) -> tuple[list[str], float]:
             for finding in pdf_result.font_family_mismatches
         )
         penalty += min(30.0, 12.0 + 3.0 * len(pdf_result.font_family_mismatches))
+    return reasons, penalty
+
+
+def _revision_reasons(revision) -> tuple[list[str], float]:
+    """Field-weighted reasons + penalty from recovered before/after edits.
+
+    A recovered material edit is HARD evidence (the original bytes are still in
+    the file), not a soft pixel heuristic, so it carries a real penalty — and it
+    corroborates any Pipeline-2 content mismatch on the same field.
+    """
+    reasons: list[str] = []
+    penalty = 0.0
+    if not revision.prior_revision_recovered:
+        return reasons, penalty
+
+    high = [c for c in revision.recovered_changes if c.weight == "high"]
+    medium = [c for c in revision.recovered_changes if c.weight == "medium"]
+
+    for c in high:
+        label = f"{c.field_hint}: " if c.field_hint else ""
+        reasons.append(
+            f"Recovered prior PDF revision — {label}original '{c.original_value}' "
+            f"was edited to '{c.current_value}' (incremental-update tamper)"
+        )
+    for c in medium:
+        label = f"{c.field_hint}: " if c.field_hint else ""
+        reasons.append(
+            f"Recovered prior PDF revision — {label}'{c.original_value}' "
+            f"changed to '{c.current_value}'"
+        )
+
+    if high:
+        penalty += min(45.0, 30.0 + 5.0 * len(high))
+    elif medium:
+        penalty += min(25.0, 15.0 + 5.0 * len(medium))
     return reasons, penalty
 
 

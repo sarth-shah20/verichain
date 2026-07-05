@@ -66,6 +66,24 @@ export interface Pipeline2Report {
   signals: Signal[];
 }
 
+/** One field value recovered from a prior PDF revision (before -> after). */
+export interface RevisionChange {
+  field_hint: string | null;
+  original_value: string;
+  current_value: string;
+  kind: "identifier" | "amount" | "date" | "name" | "text";
+  weight: "high" | "medium" | "low";
+  page_number: number;
+  bbox: [number, number, number, number] | null;
+}
+
+/** Recovered before/after evidence for an incrementally-edited PDF. */
+export interface RevisionEvidence {
+  detected: boolean;
+  summary: string | null;
+  changes: RevisionChange[];
+}
+
 export interface DocumentResult {
   doc_id: string;
   filename: string;
@@ -78,6 +96,8 @@ export interface DocumentResult {
   verdict: Verdict;
   pipeline1: Pipeline1Report;
   pipeline2: Pipeline2Report;
+  /** Before/after PDF-revision recovery, when an edited PDF was detected. */
+  revision_evidence?: RevisionEvidence | null;
 }
 
 export interface OverallResult {

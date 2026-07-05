@@ -101,6 +101,41 @@ class PdfMetadataResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class RevisionChange(BaseModel):
+    """One field value recovered from a prior PDF revision (before -> after)."""
+
+    field_hint: str | None = None
+    original_value: str
+    current_value: str
+    kind: Literal["identifier", "amount", "date", "name", "text"] = "text"
+    weight: Literal["high", "medium", "low"] = "low"
+    page_number: int = 0
+    bbox: tuple[float, float, float, float] | None = None
+
+
+class RevisionRecoveryResult(BaseModel):
+    """Prior-revision recovery + before/after diff for an incrementally-saved PDF.
+
+    The most common soft-copy fraud is an Acrobat/online-editor edit saved as an
+    incremental update, which leaves the ORIGINAL bytes still inside the file.
+    We reconstruct the prior revision, render/read both, and diff them so the
+    recovered original value can be shown next to the current (edited) one.
+    """
+
+    incremental_update_detected: bool = False
+    revisions_found: int = 0
+    prior_revision_recovered: bool = False
+    recovered_changes: list["RevisionChange"] = Field(default_factory=list)
+    original_render_path: str | None = None
+    current_render_path: str | None = None
+    summary: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+    @property
+    def material_change_detected(self) -> bool:
+        return any(c.weight in ("high", "medium") for c in self.recovered_changes)
+
+
 class WordFinding(BaseModel):
     """One localized OCR typography finding in original image coordinates."""
 
