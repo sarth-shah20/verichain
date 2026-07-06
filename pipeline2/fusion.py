@@ -51,13 +51,17 @@ Scoring guidance (0 = clean, 100 = almost certainly fraudulent):
   at "manual_review" (keep the score below 60).
 - A high-severity CONTENT mismatch against the authoritative record is serious on
   its own.
-- DETERMINISTIC identifier checks are HARD evidence, not judgement calls. A failed
-  PAN structure/holder-type check, a failed Aadhaar Verhoeff checksum, a failed
-  GSTIN checksum/state-code check, or a GSTIN whose embedded PAN is not the
-  applicant's PAN means the identifier is fabricated or belongs to someone else —
-  treat these as HIGH weight and raise the score sharply even without a pixel
-  signal. (These arrive in the verification report's "deterministic_checks" and as
-  discrepancies tagged with the check name in brackets.)
+- DETERMINISTIC checks are HARD evidence, not judgement calls — this includes both
+  identifier checks AND arithmetic-reconciliation checks. A failed PAN structure/
+  holder-type check, a failed Aadhaar Verhoeff checksum, a failed GSTIN checksum/
+  state-code check, a GSTIN whose embedded PAN is not the applicant's PAN, or a
+  payslip whose gross pay minus deductions does not equal its stated net pay,
+  means the value is fabricated/edited — treat these as HIGH weight and raise the
+  score sharply even without a pixel signal, and EVEN WHEN the document has no
+  DB-of-record match (a payslip has no issuer database by design; the arithmetic
+  check IS its verification). (These arrive in the verification report's
+  "deterministic_checks" and as discrepancies tagged with the check name in
+  brackets.)
 - FIELD-WEIGHTED risk: weight WHICH field was edited/mismatched, mirroring how a
   human underwriter reads fraud. In descending order of severity:
     1. Identity & money fields — name, PAN, Aadhaar, account number, GSTIN,

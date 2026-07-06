@@ -25,6 +25,7 @@ _DEFINITIVE_CHECKS = {
     "pan_structure", "pan_holder_type",
     "aadhaar_verhoeff",
     "gstin_structure", "gstin_state_code", "gstin_checksum", "gstin_embedded_pan",
+    "payslip_arithmetic",
 }
 
 _VERIFY_SYSTEM = """You are a verification analyst for a bank's loan-underwriting

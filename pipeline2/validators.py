@@ -10,6 +10,12 @@ gets right, and that an LLM should never be trusted to compute reliably:
   - GSTIN : 15th-char (mod-36) checksum, state-code validity, and the embedded
             PAN (chars 3-12) — which downstream code cross-checks against the
             applicant's PAN from other documents
+  - Payslip arithmetic: gross pay minus deductions must equal net pay. This is
+    the Tier-3 "domain & internal-consistency check" the project design calls
+    "cheap, high precision, underused" — and it is the ONLY signal available
+    for a payslip, since employer payslips have no authoritative DB-of-record
+    to verify against (see db.py / init_db.py: salary slips are intentionally
+    excluded from the mock DB).
 
 Design notes
 ------------
@@ -459,6 +465,75 @@ def validate_gstin(gstin: Any, applicant_pan: Any = None) -> list[dict[str, Any]
 
 
 # --------------------------------------------------------------------------- #
+# Payslip arithmetic reconciliation
+# --------------------------------------------------------------------------- #
+
+def _to_number(value: Any) -> float | None:
+    """Coerce a possibly-string, currency-formatted amount to a float.
+
+    Strips thousands separators first, then matches the numeric substring —
+    NOT a char-class strip — so a currency prefix like "Rs." doesn't leave a
+    stray decimal point behind (e.g. "Rs. 80,000" must yield 80000, not 0.8).
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).replace(",", "")
+    match = re.search(r"-?\d+(?:\.\d+)?", text)
+    if not match:
+        return None
+    try:
+        return float(match.group())
+    except ValueError:
+        return None
+
+
+# Absolute-and-relative tolerance so genuine rounding (paise, professional-tax
+# slabs) never trips this, while a fabricated figure — off by thousands — does.
+_RECONCILE_ABS_TOLERANCE = 5.0
+_RECONCILE_REL_TOLERANCE = 0.005  # 0.5% of gross
+
+
+def validate_payslip_arithmetic(
+    gross_pay: Any, deductions: Any, net_pay: Any
+) -> list[dict[str, Any]]:
+    """Check that gross pay minus deductions equals the stated net pay.
+
+    This is the single most reliable signal on a payslip: there is no
+    authoritative issuer database to check a private employer's payslip
+    against, so an internal arithmetic tamper (inflating gross_pay without
+    touching net_pay/deductions) would otherwise sail through unnoticed.
+    """
+    gross, ded, net = _to_number(gross_pay), _to_number(deductions), _to_number(net_pay)
+    if gross is None or ded is None or net is None:
+        return []  # cannot reconcile without all three figures
+
+    expected_net = gross - ded
+    tolerance = max(_RECONCILE_ABS_TOLERANCE, _RECONCILE_REL_TOLERANCE * abs(gross))
+    diff = net - expected_net
+    ok = abs(diff) <= tolerance
+
+    return [
+        _finding(
+            "payslip_arithmetic",
+            "net_pay",
+            ok,
+            "info" if ok else "high",
+            f"Net pay ({net:g}) matches gross ({gross:g}) minus deductions ({ded:g})."
+            if ok
+            else (
+                f"Arithmetic tamper: gross pay ({gross:g}) minus deductions "
+                f"({ded:g}) = {expected_net:g}, but the document states net pay "
+                f"as {net:g} — a discrepancy of {abs(diff):g}."
+            ),
+            document_value=net,
+            expected=expected_net,
+        )
+    ]
+
+
+# --------------------------------------------------------------------------- #
 # Field extraction helpers + dispatcher
 # --------------------------------------------------------------------------- #
 
@@ -505,6 +580,12 @@ def run_validators(doc_type: str | None, fields: dict[str, Any]) -> list[dict[st
         # here we only self-validate the GSTIN. If the same doc also carries a
         # PAN, use it.
         findings.extend(validate_gstin(gstin, applicant_pan=pan or None))
+
+    gross_pay = _first(fields, "gross_pay", "gross_salary", "gross_earnings")
+    deductions = _first(fields, "deductions", "total_deductions")
+    net_pay = _first(fields, "net_pay", "net_salary")
+    if gross_pay is not None and deductions is not None and net_pay is not None:
+        findings.extend(validate_payslip_arithmetic(gross_pay, deductions, net_pay))
 
     return findings
 

@@ -116,6 +116,44 @@ def test_embedded_pan_extraction():
     assert v.embedded_pan(VALID_GSTIN) == "AAPFU0939F"
 
 
+# --------------------------- Payslip arithmetic ------------------------------ #
+
+def test_payslip_reconciles():
+    f = v.validate_payslip_arithmetic(gross_pay=80000, deductions=10000, net_pay=70000)
+    c = _by_check(f, "payslip_arithmetic")
+    assert c["passed"] is True and c["severity"] == "info"
+
+
+def test_payslip_arithmetic_tamper_detected():
+    # Gross inflated (200000) while deductions/net were left untouched.
+    f = v.validate_payslip_arithmetic(gross_pay=200000, deductions=10000, net_pay=70000)
+    c = _by_check(f, "payslip_arithmetic")
+    assert c["passed"] is False and c["severity"] == "high"
+    assert c["expected"] == 190000.0
+
+
+def test_payslip_arithmetic_tolerates_rounding():
+    # Sub-rupee rounding must not false-positive.
+    f = v.validate_payslip_arithmetic(gross_pay=80000, deductions=9999.6, net_pay=70000.4)
+    assert _by_check(f, "payslip_arithmetic")["passed"] is True
+
+
+def test_payslip_arithmetic_handles_currency_strings():
+    f = v.validate_payslip_arithmetic(gross_pay="Rs. 80,000", deductions="10,000", net_pay="70,000")
+    assert _by_check(f, "payslip_arithmetic")["passed"] is True
+
+
+def test_payslip_arithmetic_skipped_when_incomplete():
+    assert v.validate_payslip_arithmetic(gross_pay=80000, deductions=None, net_pay=70000) == []
+
+
+def test_run_validators_dispatches_payslip_arithmetic():
+    fields = {"gross_pay": 200000, "deductions": 10000, "net_pay": 70000}
+    findings = v.run_validators("payslip", fields)
+    c = _by_check(findings, "payslip_arithmetic")
+    assert c["passed"] is False
+
+
 # --------------------------- Dispatcher ------------------------------------- #
 
 def test_run_validators_dispatches_by_present_fields():
