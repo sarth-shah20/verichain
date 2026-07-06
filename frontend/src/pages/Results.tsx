@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
+import { api } from "@/api";
 import {
   CircleAlert,
   Info,
@@ -27,6 +28,11 @@ export function Results() {
   const { result, loading, error, reload } = useResult(jobId);
   const [decision, setDecision] = useState<Decision | null>(null);
 
+  // Restore a previously-recorded decision so it survives reload / reopen.
+  useEffect(() => {
+    if (result?.underwriter_decision) setDecision(result.underwriter_decision);
+  }, [result?.underwriter_decision]);
+
   if (loading) return <ResultsSkeleton />;
 
   if (error || !result) {
@@ -41,9 +47,17 @@ export function Results() {
 
   const { overall, documents, cross_document, flag_history_notes } = result;
 
-  const act = (d: Decision, label: string) => {
-    setDecision(d);
-    toast(label, d === "rejected" ? "warning" : "success");
+  const act = async (d: Decision, label: string) => {
+    if (!jobId) return;
+    const prev = decision;
+    setDecision(d); // optimistic
+    try {
+      await api.recordDecision(jobId, d);
+      toast(label, d === "rejected" ? "warning" : "success");
+    } catch (e) {
+      setDecision(prev); // roll back on failure
+      toast(e instanceof Error ? e.message : "Could not record decision.", "warning");
+    }
   };
 
   // The system already has a recommendation (the verdict). Surface it on the

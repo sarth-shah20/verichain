@@ -30,6 +30,9 @@ export type FieldStatus = "ok" | "mismatch" | "missing";
 
 export type JobStatus = "processing" | "done" | "error";
 
+/** The underwriter's recorded final decision on an application. */
+export type UnderwriterDecision = "approved" | "review" | "rejected";
+
 /** A rectangular region on the document, expressed as percentages (0–100). */
 export interface Region {
   x: number;
@@ -121,6 +124,8 @@ export interface VerificationResult {
   documents: DocumentResult[];
   cross_document: CrossDocumentSignal[];
   flag_history_notes: string[];
+  /** The underwriter's recorded decision, if one has been made. */
+  underwriter_decision?: UnderwriterDecision | null;
 }
 
 export interface JobStatusResponse {
@@ -151,8 +156,10 @@ export interface HistoryItem {
   application_id: string;
   submitted_at: string;
   document_count: number;
+  doc_names?: string;
   verdict: Verdict;
   trust_score: number;
+  underwriter_decision?: UnderwriterDecision | null;
 }
 
 /** The interface the API client implements. */
@@ -161,4 +168,6 @@ export interface VeriChainApi {
   getStatus(jobId: string): Promise<JobStatusResponse>;
   getResult(jobId: string): Promise<VerificationResult>;
   getHistory(): Promise<HistoryItem[]>;
+  recordDecision(jobId: string, decision: UnderwriterDecision): Promise<void>;
+  deleteVerification(jobId: string): Promise<void>;
 }

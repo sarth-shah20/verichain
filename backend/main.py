@@ -24,10 +24,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+import store
+store.init()  # create verifications table + migrate blockchain_log (idempotent)
+
 from routes.verify import router as verify_router
 from routes.batch import router as batch_router
+from routes.history import router as history_router
 app.include_router(batch_router)  # /verify/batch — register before /verify
 app.include_router(verify_router)
+app.include_router(history_router)  # /verifications
 
 
 @app.get("/")

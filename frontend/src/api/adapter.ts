@@ -481,6 +481,7 @@ export interface BackendBatchJob {
   cross_document: BackendCrossSignal[];
   overall: BackendBatchOverall | null;
   error: string | null;
+  underwriter_decision?: string | null;
 }
 
 const VALID_SEVERITY: Severity[] = ["info", "low", "medium", "high"];
@@ -551,6 +552,10 @@ export function buildResultFromBatch(
         summary: "Verification could not be completed.",
       };
 
+  const ud = job.underwriter_decision;
+  const underwriter_decision =
+    ud === "approved" || ud === "review" || ud === "rejected" ? ud : null;
+
   return {
     application_id: job.applicant_id,
     submitted_at: job.submitted_at,
@@ -562,5 +567,6 @@ export function buildResultFromBatch(
       severity: coerceSeverity(c.severity),
     })),
     flag_history_notes: [],
+    underwriter_decision,
   };
 }

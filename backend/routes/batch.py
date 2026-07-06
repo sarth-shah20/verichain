@@ -28,6 +28,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 import jobs
+import store
 
 # Importing verify first runs its sys.path surgery (adds pipeline2/ + ai/),
 # so the flat pipeline2 imports below resolve.
@@ -264,6 +265,11 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
             cross_document=cross_signals,
             overall=overall,
         )
+        # Persist the completed verification so it survives restart, can be
+        # reopened by job_id, and shows up in the History page.
+        completed = jobs.get(job_id)
+        if completed:
+            store.save(completed)
     except Exception as exc:
         jobs.update(job_id, status="error", error=str(exc), progress=100)
 
@@ -288,12 +294,37 @@ def create_batch(req: BatchVerifyRequest) -> BatchJobResponse:
     return BatchJobResponse(job_id=job_id)
 
 
+class DecisionRequest(BaseModel):
+    decision: str  # "approved" | "review" | "rejected"
+
+
+_VALID_DECISIONS = {"approved", "review", "rejected"}
+
+
 @router.get("/{job_id}")
 def get_batch(job_id: str, response: Response) -> dict[str, Any]:
     # Polled every ~600ms; must never be cached or the client can replay a stale
     # "processing" body and hang at 100% after the job is already "done".
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     job = jobs.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Unknown job id.")
-    return job
+    if job is not None:
+        return job
+    # Not in memory (e.g. after a restart) — fall back to the persistent store so
+    # a history report can still be reopened.
+    persisted = store.get(job_id)
+    if persisted is not None:
+        return persisted
+    raise HTTPException(status_code=404, detail="Unknown job id.")
+
+
+@router.post("/{job_id}/decision")
+def record_decision(job_id: str, req: DecisionRequest) -> dict[str, Any]:
+    """Record the underwriter's final decision (persisted + written to audit log)."""
+    if req.decision not in _VALID_DECISIONS:
+        raise HTTPException(status_code=400, detail="Invalid decision.")
+    result = store.record_decision(job_id, req.decision)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Verification not found.")
+    # Keep the in-memory job (if still live) in sync so a poll reflects it.
+    jobs.update(job_id, underwriter_decision=req.decision)
+    return {"recorded": True, "job_id": job_id, **result}

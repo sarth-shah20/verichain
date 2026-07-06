@@ -3,10 +3,28 @@ import type {
   JobStatusResponse,
   SubmitOptions,
   SubmitResponse,
+  UnderwriterDecision,
   VeriChainApi,
   VerificationResult,
 } from "./types";
-import { buildResultFromBatch, type BackendBatchJob } from "./adapter";
+import {
+  buildResultFromBatch,
+  decisionToVerdict,
+  toTrustScore,
+  type BackendBatchJob,
+} from "./adapter";
+
+/** One row from GET /verifications (the persistent history list). */
+interface BackendHistoryRow {
+  job_id: string;
+  applicant_id: string;
+  submitted_at: string;
+  doc_names: string | null;
+  document_count: number;
+  decision: string;
+  risk_score: number;
+  underwriter_decision: string | null;
+}
 
 // ---------------------------------------------------------------------------
 // Real HTTP client — drives the backend's ASYNC BATCH contract:
@@ -142,25 +160,48 @@ export class RealVeriChainApi implements VeriChainApi {
   }
 
   async getHistory(): Promise<HistoryItem[]> {
-    // The contract exposes per-applicant audit history but no "list all"; the
-    // dashboard history is this session's batch jobs, read back from the server.
-    const ids = this.order.length ? this.order : [...this.localJobs.keys()];
-    const settled = await Promise.allSettled(ids.map((id) => this.fetchJob(id)));
-
-    const items: HistoryItem[] = [];
-    for (const s of settled) {
-      if (s.status !== "fulfilled" || s.value.status !== "done") continue;
-      const job = s.value;
-      const result = buildResultFromBatch(job, this.baseUrl, this.thumbsFor(job.job_id));
-      items.push({
-        job_id: job.job_id,
-        application_id: result.application_id,
-        submitted_at: result.submitted_at,
-        document_count: result.documents.length,
-        verdict: result.overall.verdict,
-        trust_score: result.overall.trust_score,
-      });
+    // Persistent, server-side history — survives restart / new session.
+    const res = await fetch(this.url("/verifications"), { cache: "no-store" });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`API ${res.status}: ${text || res.statusText}`);
     }
-    return items.sort((a, b) => b.submitted_at.localeCompare(a.submitted_at));
+    const rows = (await res.json()) as BackendHistoryRow[];
+    const ud = (v: string | null): UnderwriterDecision | null =>
+      v === "approved" || v === "review" || v === "rejected" ? v : null;
+    return rows.map((r) => ({
+      job_id: r.job_id,
+      application_id: r.applicant_id,
+      submitted_at: r.submitted_at,
+      document_count: r.document_count,
+      doc_names: r.doc_names ?? undefined,
+      // Map through the same functions the rest of the UI uses so the verdict
+      // and (clamped) trust score are identical to the report view.
+      verdict: decisionToVerdict(r.decision),
+      trust_score: toTrustScore(r.decision, r.risk_score),
+      underwriter_decision: ud(r.underwriter_decision),
+    }));
+  }
+
+  async recordDecision(jobId: string, decision: UnderwriterDecision): Promise<void> {
+    const res = await fetch(this.url(`/verify/batch/${encodeURIComponent(jobId)}/decision`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Could not record decision (${res.status}): ${text || res.statusText}`);
+    }
+  }
+
+  async deleteVerification(jobId: string): Promise<void> {
+    const res = await fetch(this.url(`/verifications/${encodeURIComponent(jobId)}`), {
+      method: "DELETE",
+    });
+    if (!res.ok && res.status !== 404) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Could not delete (${res.status}): ${text || res.statusText}`);
+    }
   }
 }

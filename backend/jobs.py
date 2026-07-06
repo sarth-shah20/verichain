@@ -40,6 +40,7 @@ def create(applicant_id: str, document_count: int) -> str:
             "documents": [],
             "cross_document": [],
             "overall": None,
+            "underwriter_decision": None,
             "error": None,
         }
     return job_id
