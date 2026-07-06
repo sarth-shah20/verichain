@@ -110,18 +110,31 @@ export function decisionToVerdict(decision: string): Verdict {
  * `decision`. This guarantees the gauge (which derives colour from the score via
  * TRUST_THRESHOLDS) always agrees with the verdict pill.
  */
+// Displayed trust is kept off the absolute extremes: no document reads as 0
+// (never "certainly fraudulent") or 100 ("certainly genuine"), leaving visible
+// headroom for model error. These bounds sit INSIDE every verdict band
+// (DISPLAY_FLOOR is still high-risk, DISPLAY_CEIL still genuine), so the gauge
+// colour and the verdict pill can never disagree.
+const DISPLAY_FLOOR = 15;
+const DISPLAY_CEIL = 95;
+
 export function toTrustScore(decision: string, authScore: number): number {
   const trust = clamp(Math.round(authScore), 0, 100);
+  let banded: number;
   switch (decision) {
     case "auto_approve": // genuine band: [genuine, 100]
-      return Math.max(trust, TRUST_THRESHOLDS.genuine);
+      banded = Math.max(trust, TRUST_THRESHOLDS.genuine);
+      break;
     case "human_review": // review band: [review, genuine-1]
-      return clamp(trust, TRUST_THRESHOLDS.review, TRUST_THRESHOLDS.genuine - 1);
+      banded = clamp(trust, TRUST_THRESHOLDS.review, TRUST_THRESHOLDS.genuine - 1);
+      break;
     case "auto_reject": // high-risk band: [0, review-1]
-      return Math.min(trust, TRUST_THRESHOLDS.review - 1);
+      banded = Math.min(trust, TRUST_THRESHOLDS.review - 1);
+      break;
     default:
-      return trust;
+      banded = trust;
   }
+  return clamp(banded, DISPLAY_FLOOR, DISPLAY_CEIL);
 }
 
 /** Confidence proxy: the contract has none, so derive it from how far the

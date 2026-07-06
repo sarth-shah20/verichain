@@ -115,7 +115,8 @@ export function Processing() {
           Verifying documents
         </h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          This usually takes a few seconds. You can stay on this page.
+          Each document runs full forensic analysis and AI content verification —
+          this typically takes 30–60 seconds per document. You can stay on this page.
         </p>
       </header>
 

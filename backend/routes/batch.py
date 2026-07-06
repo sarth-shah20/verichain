@@ -61,14 +61,47 @@ class BatchJobResponse(BaseModel):
 
 # ─── Cross-document mapping ────────────────────────────────────────────────────
 
+# Period-unit keyword groups used to detect when a discrepancy's raw values are
+# expressed in DIFFERENT units (e.g. an annual figure vs a monthly one). Showing
+# "370000 (Annual) vs 80000 (Monthly)" side-by-side reads as contradictory, so
+# when the units differ we drop the raw tuple and let the narrative carry it.
+_PERIOD_UNITS: list[tuple[str, tuple[str, ...]]] = [
+    ("annual", ("annual", "annually", "yearly", "per annum", "p.a", "/yr", "/year", "per year")),
+    ("monthly", ("monthly", "per month", "/mo", "/month", "p.m")),
+    ("quarterly", ("quarterly", "per quarter")),
+    ("weekly", ("weekly", "per week")),
+    ("daily", ("daily", "per day")),
+]
+
+
+def _unit_of(value: str) -> str | None:
+    v = value.lower()
+    for name, kws in _PERIOD_UNITS:
+        if any(k in v for k in kws):
+            return name
+    return None
+
+
+def _units_differ(values: list[Any]) -> bool:
+    units = {_unit_of(str(v)) for v in values}
+    units.discard(None)
+    return len(units) > 1
+
+
 def _map_cross(cross_report: dict[str, Any]) -> list[dict[str, Any]]:
     """Flatten the pipeline-2 discrepancy report into UI-friendly signals."""
     cross = cross_report.get("cross_document", {})
     out: list[dict[str, Any]] = []
     for d in cross.get("discrepancies", []):
-        vals = " vs ".join(str(v) for v in d.get("values", []))
+        values = d.get("values", []) or []
+        vals = " vs ".join(str(v) for v in values)
         detail = d.get("detail", "")
-        reason = f"{detail} (values: {vals})" if vals else detail
+        # Only append the raw values tuple when it aids clarity — i.e. the values
+        # share a comparable unit. When units differ, the narrative alone is used.
+        if vals and not _units_differ(values):
+            reason = f"{detail} (values: {vals})" if detail else f"values: {vals}"
+        else:
+            reason = detail or f"values: {vals}"
         out.append(
             {
                 "label": f"{d.get('attribute', 'Attribute')} differs across documents",
