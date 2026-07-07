@@ -70,7 +70,26 @@ def setup(cur: sqlite3.Cursor) -> None:
             risk_score   INTEGER,
             decision     TEXT,
             timestamp    TEXT,
-            tx_hash      TEXT
+            tx_hash      TEXT,
+            event_type   TEXT DEFAULT 'system_verdict'
+        )
+    """)
+
+    # Persistent history of completed verifications (survives restart). The full
+    # report lives in result_json so a report can be reopened by job_id; delete
+    # is soft (deleted=1) so the append-only audit log above is never rewritten.
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS verifications (
+            job_id               TEXT PRIMARY KEY,
+            applicant_id         TEXT,
+            submitted_at         TEXT,
+            doc_names            TEXT,
+            document_count       INTEGER,
+            decision             TEXT,
+            risk_score           INTEGER,
+            underwriter_decision TEXT,
+            result_json          TEXT,
+            deleted              INTEGER DEFAULT 0
         )
     """)
 

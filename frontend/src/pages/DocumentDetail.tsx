@@ -4,6 +4,7 @@ import { ArrowLeft, Filter } from "lucide-react";
 import { useResult } from "@/lib/useResult";
 import type { Severity, Signal } from "@/api/types";
 import { DocumentViewer } from "@/components/DocumentViewer";
+import { BeforeAfterPanel } from "@/components/BeforeAfterPanel";
 import { SignalCard } from "@/components/SignalCard";
 import { PipelineBadge } from "@/components/PipelineBadge";
 import { VerdictPill } from "@/components/VerdictPill";
@@ -148,6 +149,11 @@ export function DocumentDetail() {
 
         {/* Right: findings */}
         <div className="space-y-5">
+          {/* Recovered before/after evidence for edited PDFs (headline signal) */}
+          {doc.revision_evidence?.detected && (
+            <BeforeAfterPanel evidence={doc.revision_evidence} />
+          )}
+
           {/* Severity filter */}
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">

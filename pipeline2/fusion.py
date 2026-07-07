@@ -51,6 +51,27 @@ Scoring guidance (0 = clean, 100 = almost certainly fraudulent):
   at "manual_review" (keep the score below 60).
 - A high-severity CONTENT mismatch against the authoritative record is serious on
   its own.
+- DETERMINISTIC checks are HARD evidence, not judgement calls — this includes both
+  identifier checks AND arithmetic-reconciliation checks. A failed PAN structure/
+  holder-type check, a failed Aadhaar Verhoeff checksum, a failed GSTIN checksum/
+  state-code check, a GSTIN whose embedded PAN is not the applicant's PAN, or a
+  payslip whose gross pay minus deductions does not equal its stated net pay,
+  means the value is fabricated/edited — treat these as HIGH weight and raise the
+  score sharply even without a pixel signal, and EVEN WHEN the document has no
+  DB-of-record match (a payslip has no issuer database by design; the arithmetic
+  check IS its verification). (These arrive in the verification report's
+  "deterministic_checks" and as discrepancies tagged with the check name in
+  brackets.)
+- FIELD-WEIGHTED risk: weight WHICH field was edited/mismatched, mirroring how a
+  human underwriter reads fraud. In descending order of severity:
+    1. Identity & money fields — name, PAN, Aadhaar, account number, GSTIN,
+       income/salary/amount, and any recovered "original -> edited" value on such
+       a field. An edit or mismatch here is a top_flag at HIGH weight.
+    2. Structural/authority fields — dates, issuer, survey/parcel numbers,
+       employer, acknowledgement numbers: MEDIUM weight.
+    3. Cosmetic/description fields — descriptions, labels, formatting, layout
+       text, benign re-saves with no value change: LOW weight, usually not a flag.
+  Never let a cosmetic-field edit outrank an identity/amount edit.
 - "unverified" (no DB record) is uncertainty, not proof of fraud -> moderate.
 - If a flag matches a known prior FALSE flag, down-weight it and note the
   adjustment.
@@ -66,10 +87,16 @@ Return STRICT JSON only. Cite concrete evidence from the inputs -- do not invent
 
 
 def _slim_verification(v: dict[str, Any]) -> dict[str, Any]:
+    ver = v.get("verification", {})
+    # Only the FAILED deterministic checks matter to fusion; passing ones are noise.
+    det_failures = [
+        c for c in ver.get("deterministic_checks", []) if c.get("passed") is False
+    ]
     return {
         "document": v.get("document", {}),
-        "match_status": v.get("verification", {}).get("match_status"),
-        "discrepancies": v.get("verification", {}).get("discrepancies", []),
+        "match_status": ver.get("match_status"),
+        "discrepancies": ver.get("discrepancies", []),
+        "deterministic_check_failures": det_failures,
         "extraction_observations": v.get("extraction", {}).get("extraction_observations", []),
         "db_found": v.get("database", {}).get("found"),
     }

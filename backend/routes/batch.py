@@ -28,6 +28,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 import jobs
+import store
 
 # Importing verify first runs its sys.path surgery (adds pipeline2/ + ai/),
 # so the flat pipeline2 imports below resolve.
@@ -61,14 +62,47 @@ class BatchJobResponse(BaseModel):
 
 # ─── Cross-document mapping ────────────────────────────────────────────────────
 
+# Period-unit keyword groups used to detect when a discrepancy's raw values are
+# expressed in DIFFERENT units (e.g. an annual figure vs a monthly one). Showing
+# "370000 (Annual) vs 80000 (Monthly)" side-by-side reads as contradictory, so
+# when the units differ we drop the raw tuple and let the narrative carry it.
+_PERIOD_UNITS: list[tuple[str, tuple[str, ...]]] = [
+    ("annual", ("annual", "annually", "yearly", "per annum", "p.a", "/yr", "/year", "per year")),
+    ("monthly", ("monthly", "per month", "/mo", "/month", "p.m")),
+    ("quarterly", ("quarterly", "per quarter")),
+    ("weekly", ("weekly", "per week")),
+    ("daily", ("daily", "per day")),
+]
+
+
+def _unit_of(value: str) -> str | None:
+    v = value.lower()
+    for name, kws in _PERIOD_UNITS:
+        if any(k in v for k in kws):
+            return name
+    return None
+
+
+def _units_differ(values: list[Any]) -> bool:
+    units = {_unit_of(str(v)) for v in values}
+    units.discard(None)
+    return len(units) > 1
+
+
 def _map_cross(cross_report: dict[str, Any]) -> list[dict[str, Any]]:
     """Flatten the pipeline-2 discrepancy report into UI-friendly signals."""
     cross = cross_report.get("cross_document", {})
     out: list[dict[str, Any]] = []
     for d in cross.get("discrepancies", []):
-        vals = " vs ".join(str(v) for v in d.get("values", []))
+        values = d.get("values", []) or []
+        vals = " vs ".join(str(v) for v in values)
         detail = d.get("detail", "")
-        reason = f"{detail} (values: {vals})" if vals else detail
+        # Only append the raw values tuple when it aids clarity — i.e. the values
+        # share a comparable unit. When units differ, the narrative alone is used.
+        if vals and not _units_differ(values):
+            reason = f"{detail} (values: {vals})" if detail else f"values: {vals}"
+        else:
+            reason = detail or f"values: {vals}"
         out.append(
             {
                 "label": f"{d.get('attribute', 'Attribute')} differs across documents",
@@ -231,6 +265,11 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
             cross_document=cross_signals,
             overall=overall,
         )
+        # Persist the completed verification so it survives restart, can be
+        # reopened by job_id, and shows up in the History page.
+        completed = jobs.get(job_id)
+        if completed:
+            store.save(completed)
     except Exception as exc:
         jobs.update(job_id, status="error", error=str(exc), progress=100)
 
@@ -255,12 +294,37 @@ def create_batch(req: BatchVerifyRequest) -> BatchJobResponse:
     return BatchJobResponse(job_id=job_id)
 
 
+class DecisionRequest(BaseModel):
+    decision: str  # "approved" | "review" | "rejected"
+
+
+_VALID_DECISIONS = {"approved", "review", "rejected"}
+
+
 @router.get("/{job_id}")
 def get_batch(job_id: str, response: Response) -> dict[str, Any]:
     # Polled every ~600ms; must never be cached or the client can replay a stale
     # "processing" body and hang at 100% after the job is already "done".
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     job = jobs.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Unknown job id.")
-    return job
+    if job is not None:
+        return job
+    # Not in memory (e.g. after a restart) — fall back to the persistent store so
+    # a history report can still be reopened.
+    persisted = store.get(job_id)
+    if persisted is not None:
+        return persisted
+    raise HTTPException(status_code=404, detail="Unknown job id.")
+
+
+@router.post("/{job_id}/decision")
+def record_decision(job_id: str, req: DecisionRequest) -> dict[str, Any]:
+    """Record the underwriter's final decision (persisted + written to audit log)."""
+    if req.decision not in _VALID_DECISIONS:
+        raise HTTPException(status_code=400, detail="Invalid decision.")
+    result = store.record_decision(job_id, req.decision)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Verification not found.")
+    # Keep the in-memory job (if still live) in sync so a poll reflects it.
+    jobs.update(job_id, underwriter_decision=req.decision)
+    return {"recorded": True, "job_id": job_id, **result}

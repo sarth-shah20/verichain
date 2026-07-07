@@ -30,6 +30,9 @@ export type FieldStatus = "ok" | "mismatch" | "missing";
 
 export type JobStatus = "processing" | "done" | "error";
 
+/** The underwriter's recorded final decision on an application. */
+export type UnderwriterDecision = "approved" | "review" | "rejected";
+
 /** A rectangular region on the document, expressed as percentages (0–100). */
 export interface Region {
   x: number;
@@ -66,6 +69,24 @@ export interface Pipeline2Report {
   signals: Signal[];
 }
 
+/** One field value recovered from a prior PDF revision (before -> after). */
+export interface RevisionChange {
+  field_hint: string | null;
+  original_value: string;
+  current_value: string;
+  kind: "identifier" | "amount" | "date" | "name" | "text";
+  weight: "high" | "medium" | "low";
+  page_number: number;
+  bbox: [number, number, number, number] | null;
+}
+
+/** Recovered before/after evidence for an incrementally-edited PDF. */
+export interface RevisionEvidence {
+  detected: boolean;
+  summary: string | null;
+  changes: RevisionChange[];
+}
+
 export interface DocumentResult {
   doc_id: string;
   filename: string;
@@ -78,6 +99,8 @@ export interface DocumentResult {
   verdict: Verdict;
   pipeline1: Pipeline1Report;
   pipeline2: Pipeline2Report;
+  /** Before/after PDF-revision recovery, when an edited PDF was detected. */
+  revision_evidence?: RevisionEvidence | null;
 }
 
 export interface OverallResult {
@@ -101,6 +124,8 @@ export interface VerificationResult {
   documents: DocumentResult[];
   cross_document: CrossDocumentSignal[];
   flag_history_notes: string[];
+  /** The underwriter's recorded decision, if one has been made. */
+  underwriter_decision?: UnderwriterDecision | null;
 }
 
 export interface JobStatusResponse {
@@ -131,8 +156,10 @@ export interface HistoryItem {
   application_id: string;
   submitted_at: string;
   document_count: number;
+  doc_names?: string;
   verdict: Verdict;
   trust_score: number;
+  underwriter_decision?: UnderwriterDecision | null;
 }
 
 /** The interface the API client implements. */
@@ -141,4 +168,6 @@ export interface VeriChainApi {
   getStatus(jobId: string): Promise<JobStatusResponse>;
   getResult(jobId: string): Promise<VerificationResult>;
   getHistory(): Promise<HistoryItem[]>;
+  recordDecision(jobId: string, decision: UnderwriterDecision): Promise<void>;
+  deleteVerification(jobId: string): Promise<void>;
 }

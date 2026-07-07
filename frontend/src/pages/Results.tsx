@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
+import { api } from "@/api";
 import {
   CircleAlert,
   Info,
@@ -16,7 +17,7 @@ import { SeverityBadge } from "@/components/SeverityBadge";
 import { CardSkeleton, Skeleton } from "@/components/Skeleton";
 import { ErrorState } from "@/components/States";
 import { useToast } from "@/app/toast";
-import { formatDateTime } from "@/lib/format";
+import { cx, formatDateTime } from "@/lib/format";
 
 type Decision = "approved" | "review" | "rejected";
 
@@ -26,6 +27,11 @@ export function Results() {
   const { toast } = useToast();
   const { result, loading, error, reload } = useResult(jobId);
   const [decision, setDecision] = useState<Decision | null>(null);
+
+  // Restore a previously-recorded decision so it survives reload / reopen.
+  useEffect(() => {
+    if (result?.underwriter_decision) setDecision(result.underwriter_decision);
+  }, [result?.underwriter_decision]);
 
   if (loading) return <ResultsSkeleton />;
 
@@ -41,10 +47,27 @@ export function Results() {
 
   const { overall, documents, cross_document, flag_history_notes } = result;
 
-  const act = (d: Decision, label: string) => {
-    setDecision(d);
-    toast(label, d === "rejected" ? "warning" : "success");
+  const act = async (d: Decision, label: string) => {
+    if (!jobId) return;
+    const prev = decision;
+    setDecision(d); // optimistic
+    try {
+      await api.recordDecision(jobId, d);
+      toast(label, d === "rejected" ? "warning" : "success");
+    } catch (e) {
+      setDecision(prev); // roll back on failure
+      toast(e instanceof Error ? e.message : "Could not record decision.", "warning");
+    }
   };
+
+  // The system already has a recommendation (the verdict). Surface it on the
+  // matching action so the underwriter sees "system recommends, human decides".
+  const RECOMMENDED: Record<typeof overall.verdict, Decision> = {
+    genuine: "approved",
+    review: "review",
+    high_risk: "rejected",
+  };
+  const recommended = RECOMMENDED[overall.verdict];
 
   return (
     <div className="space-y-6">
@@ -73,8 +96,11 @@ export function Results() {
 
       {/* Hero verdict */}
       <section className="card flex flex-col gap-6 p-6 md:flex-row md:items-center">
-        <div className="flex shrink-0 justify-center">
+        <div className="flex shrink-0 flex-col items-center gap-2">
           <ScoreGauge score={overall.trust_score} size={180} />
+          <p className="max-w-[190px] text-center text-xs text-slate-400">
+            Trust score — higher is more trustworthy
+          </p>
         </div>
         <div className="flex-1 space-y-3">
           <div className="flex flex-wrap items-center gap-3">
@@ -89,25 +115,33 @@ export function Results() {
           <p className="text-lg font-medium leading-relaxed text-slate-800 dark:text-slate-100">
             {overall.summary}
           </p>
-          <div className="flex flex-wrap gap-2 pt-1">
-            <button
-              onClick={() => act("approved", "Application approved.")}
-              className="btn-primary"
-            >
-              <CheckCircle2 className="h-4 w-4" /> Approve
-            </button>
-            <button
-              onClick={() => act("review", "Sent to manual review.")}
-              className="btn-secondary"
-            >
-              <CircleAlert className="h-4 w-4" /> Send to manual review
-            </button>
-            <button
-              onClick={() => act("rejected", "Application rejected.")}
-              className="btn inline-flex border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300"
-            >
-              <XCircle className="h-4 w-4" /> Reject
-            </button>
+          <div className="pt-1">
+            <p className="mb-1.5 text-xs font-medium text-slate-400">
+              System recommends — you decide:
+            </p>
+            <div className="flex flex-wrap items-stretch gap-2">
+              <ActionButton
+                label="Approve"
+                icon={CheckCircle2}
+                onClick={() => act("approved", "Application approved.")}
+                recommended={recommended === "approved"}
+                tone="green"
+              />
+              <ActionButton
+                label="Send to manual review"
+                icon={CircleAlert}
+                onClick={() => act("review", "Sent to manual review.")}
+                recommended={recommended === "review"}
+                tone="amber"
+              />
+              <ActionButton
+                label="Reject"
+                icon={XCircle}
+                onClick={() => act("rejected", "Application rejected.")}
+                recommended={recommended === "rejected"}
+                tone="red"
+              />
+            </div>
           </div>
         </div>
       </section>
@@ -180,6 +214,65 @@ export function Results() {
       >
         View all verifications →
       </Link>
+    </div>
+  );
+}
+
+const TONE_STYLES: Record<
+  "green" | "amber" | "red",
+  { rec: string; plain: string; ring: string }
+> = {
+  green: {
+    rec: "bg-green-600 text-white hover:bg-green-700 border-transparent",
+    plain:
+      "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300",
+    ring: "ring-green-500/40",
+  },
+  amber: {
+    rec: "bg-amber-500 text-white hover:bg-amber-600 border-transparent",
+    plain:
+      "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300",
+    ring: "ring-amber-500/40",
+  },
+  red: {
+    rec: "bg-red-600 text-white hover:bg-red-700 border-transparent",
+    plain:
+      "border-red-200 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300",
+    ring: "ring-red-500/40",
+  },
+};
+
+function ActionButton({
+  label,
+  icon: Icon,
+  onClick,
+  recommended,
+  tone,
+}: {
+  label: string;
+  icon: typeof CheckCircle2;
+  onClick: () => void;
+  recommended: boolean;
+  tone: "green" | "amber" | "red";
+}) {
+  const t = TONE_STYLES[tone];
+  return (
+    <div className="relative">
+      {recommended && (
+        <span className="absolute -top-2 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow dark:bg-white dark:text-slate-900">
+          Recommended
+        </span>
+      )}
+      <button
+        onClick={onClick}
+        className={cx(
+          "btn inline-flex border font-semibold",
+          recommended ? t.rec : t.plain,
+          recommended && `ring-2 ring-offset-2 ring-offset-white dark:ring-offset-slate-900 ${t.ring}`
+        )}
+      >
+        <Icon className="h-4 w-4" /> {label}
+      </button>
     </div>
   );
 }

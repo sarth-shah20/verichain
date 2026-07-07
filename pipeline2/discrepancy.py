@@ -18,6 +18,7 @@ from typing import Any
 
 import llm_client
 import utils
+import validators
 
 _CROSS_SYSTEM = """You are a consistency analyst for a bank's loan-underwriting
 pipeline.
@@ -49,6 +50,74 @@ def _collect_docs(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return docs
+
+
+def _deterministic_cross(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deterministic cross-document identifier checks.
+
+    Two killer checks an LLM should not be trusted to compute:
+      1. PAN consistency — the same person's PAN must be identical across every
+         document that carries one; two different valid PANs is an identity
+         conflict.
+      2. GSTIN <-> applicant PAN — a GSTIN embeds the holder's PAN in characters
+         3-12. If the GSTIN on a business/tax document embeds a PAN that is not
+         the applicant's PAN, the GST registration belongs to a different entity.
+    """
+    out: list[dict[str, Any]] = []
+
+    # Collect (doc_type, PAN) pairs where a PAN was extracted.
+    pans: list[tuple[str, str]] = []
+    for d in docs:
+        pan = validators.extract_pan(d.get("fields", {}))
+        if pan:
+            pans.append((d.get("doc_type", "document"), pan))
+
+    distinct_pans = {p for _, p in pans}
+
+    # 1. PAN must agree across documents.
+    if len(distinct_pans) > 1:
+        out.append(
+            {
+                "attribute": "PAN",
+                "documents": [dt for dt, _ in pans],
+                "values": [p for _, p in pans],
+                "severity": "high",
+                "detail": (
+                    "Different PAN numbers appear across the applicant's "
+                    "documents — the file may combine more than one identity."
+                ),
+            }
+        )
+
+    # The applicant's PAN: the single agreed PAN if documents are consistent.
+    applicant_pan = next(iter(distinct_pans)) if len(distinct_pans) == 1 else None
+
+    # 2. GSTIN embedded PAN must equal the applicant's PAN.
+    for d in docs:
+        gstin = validators.extract_gstin(d.get("fields", {}))
+        if not gstin:
+            continue
+        emb = validators.embedded_pan(gstin)
+        if not emb:
+            continue
+        # Compare against the applicant PAN if we have one, else against any
+        # PAN present elsewhere in the file.
+        target = applicant_pan or next(iter(distinct_pans), None)
+        if target and emb != target:
+            out.append(
+                {
+                    "attribute": "GSTIN / PAN",
+                    "documents": [d.get("doc_type", "document")],
+                    "values": [f"GSTIN PAN {emb}", f"applicant PAN {target}"],
+                    "severity": "high",
+                    "detail": (
+                        "The PAN embedded in the GSTIN does not match the "
+                        "applicant's PAN — the GST registration belongs to a "
+                        "different entity (possible impersonation)."
+                    ),
+                }
+            )
+    return out
 
 
 def _build_user_prompt(docs: list[dict[str, Any]]) -> str:
@@ -107,6 +176,16 @@ def find_cross_document_discrepancies(
 
     docs = _collect_docs(reports)
     cross = llm_client.call_text(_CROSS_SYSTEM, _build_user_prompt(docs), json_mode=True)
+
+    # Fold in deterministic identifier cross-checks (PAN consistency, GSTIN<->PAN).
+    # These are high-confidence and must not be diluted by the LLM's judgement, so
+    # we prepend them and force inconsistency when any deterministic conflict fires.
+    det_cross = _deterministic_cross(docs)
+    if det_cross:
+        cross.setdefault("discrepancies", [])
+        existing = cross["discrepancies"]
+        cross["discrepancies"] = det_cross + (existing if isinstance(existing, list) else [])
+        cross["entity_consistency"] = "inconsistent"
 
     report: dict[str, Any] = {
         "report_type": "cross_document_discrepancy",

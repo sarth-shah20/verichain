@@ -45,6 +45,8 @@ _LAND_COLLECTIONS = {
 
 def _make_lookup_key(key_fields: list[str], values: dict[str, Any]) -> str:
     """Build the pipe-joined composite key used for DB lookups."""
+    if not isinstance(values, dict):
+        return ""
     parts = [str(values.get(k, "")).strip() for k in key_fields]
     return "|".join(p for p in parts if p)
 
@@ -162,6 +164,8 @@ def fetch_record(
 
     Returns the standard response dict described in the module docstring.
     """
+    if not isinstance(extracted_fields, dict):
+        extracted_fields = {}
     key = _make_lookup_key(key_fields, extracted_fields)
     record = _backend_fetch(db_collection, key, extracted_fields)
     if record is None:

@@ -20,6 +20,7 @@ import type {
   DocumentResult,
   ExtractedField,
   OverallResult,
+  RevisionEvidence,
   Severity,
   Signal,
   SignalFamily,
@@ -39,6 +40,22 @@ export interface BackendFieldVerification {
   matched_fields: string[];
 }
 
+export interface BackendRevisionChange {
+  field_hint: string | null;
+  original_value: string;
+  current_value: string;
+  kind: string;
+  weight: string;
+  page_number: number;
+  bbox: [number, number, number, number] | null;
+}
+
+export interface BackendRevisionEvidence {
+  detected: boolean;
+  summary: string | null;
+  changes: BackendRevisionChange[];
+}
+
 export interface BackendVerifyResponse {
   /** AUTHENTICITY score, 0–100 (higher = more genuine). */
   risk_score: number;
@@ -48,6 +65,8 @@ export interface BackendVerifyResponse {
   blockchain_tx: string;
   heatmap_url: string | null;
   field_verification: BackendFieldVerification;
+  /** Additive (batch only): recovered before/after PDF-revision evidence. */
+  revision_evidence?: BackendRevisionEvidence | null;
 }
 
 export interface BackendHistoryEvent {
@@ -91,18 +110,31 @@ export function decisionToVerdict(decision: string): Verdict {
  * `decision`. This guarantees the gauge (which derives colour from the score via
  * TRUST_THRESHOLDS) always agrees with the verdict pill.
  */
+// Displayed trust is kept off the absolute extremes: no document reads as 0
+// (never "certainly fraudulent") or 100 ("certainly genuine"), leaving visible
+// headroom for model error. These bounds sit INSIDE every verdict band
+// (DISPLAY_FLOOR is still high-risk, DISPLAY_CEIL still genuine), so the gauge
+// colour and the verdict pill can never disagree.
+const DISPLAY_FLOOR = 15;
+const DISPLAY_CEIL = 95;
+
 export function toTrustScore(decision: string, authScore: number): number {
   const trust = clamp(Math.round(authScore), 0, 100);
+  let banded: number;
   switch (decision) {
     case "auto_approve": // genuine band: [genuine, 100]
-      return Math.max(trust, TRUST_THRESHOLDS.genuine);
+      banded = Math.max(trust, TRUST_THRESHOLDS.genuine);
+      break;
     case "human_review": // review band: [review, genuine-1]
-      return clamp(trust, TRUST_THRESHOLDS.review, TRUST_THRESHOLDS.genuine - 1);
+      banded = clamp(trust, TRUST_THRESHOLDS.review, TRUST_THRESHOLDS.genuine - 1);
+      break;
     case "auto_reject": // high-risk band: [0, review-1]
-      return Math.min(trust, TRUST_THRESHOLDS.review - 1);
+      banded = Math.min(trust, TRUST_THRESHOLDS.review - 1);
+      break;
     default:
-      return trust;
+      banded = trust;
   }
+  return clamp(banded, DISPLAY_FLOOR, DISPLAY_CEIL);
 }
 
 /** Confidence proxy: the contract has none, so derive it from how far the
@@ -275,6 +307,41 @@ function mapDocument(input: DocInput, apiBase: string): DocumentResult {
     });
   }
 
+  // Recovered before/after PDF-revision evidence (the killer edited-PDF signal).
+  const revisionEvidence: RevisionEvidence | null =
+    resp.revision_evidence && resp.revision_evidence.detected
+      ? {
+          detected: true,
+          summary: resp.revision_evidence.summary ?? null,
+          changes: (resp.revision_evidence.changes ?? []).map((c) => ({
+            field_hint: c.field_hint ?? null,
+            original_value: c.original_value,
+            current_value: c.current_value,
+            kind: (["identifier", "amount", "date", "name", "text"].includes(c.kind)
+              ? c.kind
+              : "text") as RevisionEvidence["changes"][number]["kind"],
+            weight: (["high", "medium", "low"].includes(c.weight)
+              ? c.weight
+              : "low") as RevisionEvidence["changes"][number]["weight"],
+            page_number: c.page_number ?? 0,
+            bbox: c.bbox ?? null,
+          })),
+        }
+      : null;
+
+  if (revisionEvidence) {
+    for (const c of revisionEvidence.changes) {
+      const hint = c.field_hint ? `${c.field_hint} — ` : "";
+      p1Signals.unshift({
+        family: "structure",
+        label: "Edited PDF revision recovered",
+        severity: c.weight === "high" ? "high" : "medium",
+        reason: `${hint}original: ${c.original_value} → edited: ${c.current_value}. The prior revision is still embedded in the PDF (incremental-update edit).`,
+        region: null,
+      });
+    }
+  }
+
   // Extracted-fields table. The async batch endpoint returns real extracted
   // VALUES, so prefer those; fall back to matched field names otherwise.
   const matched = new Set(resp.field_verification.matched_fields ?? []);
@@ -319,6 +386,7 @@ function mapDocument(input: DocInput, apiBase: string): DocumentResult {
       extracted_fields: extracted,
       signals: p2Signals,
     },
+    revision_evidence: revisionEvidence,
   };
 }
 
@@ -413,6 +481,7 @@ export interface BackendBatchJob {
   cross_document: BackendCrossSignal[];
   overall: BackendBatchOverall | null;
   error: string | null;
+  underwriter_decision?: string | null;
 }
 
 const VALID_SEVERITY: Severity[] = ["info", "low", "medium", "high"];
@@ -483,6 +552,10 @@ export function buildResultFromBatch(
         summary: "Verification could not be completed.",
       };
 
+  const ud = job.underwriter_decision;
+  const underwriter_decision =
+    ud === "approved" || ud === "review" || ud === "rejected" ? ud : null;
+
   return {
     application_id: job.applicant_id,
     submitted_at: job.submitted_at,
@@ -494,5 +567,6 @@ export function buildResultFromBatch(
       severity: coerceSeverity(c.severity),
     })),
     flag_history_notes: [],
+    underwriter_decision,
   };
 }
