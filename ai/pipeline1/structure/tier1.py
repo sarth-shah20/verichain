@@ -38,6 +38,7 @@ def run_tier1(path: str | Path, classification: ClassificationResult) -> TierRes
     evidence: dict[str, Any] = {}
     score = 100.0
     confidence = "high"
+    structure_regions: list[dict[str, Any]] = []
 
     if classification.document_type in BORN_DIGITAL_TYPES:
         pdf_result = check_pdf_metadata(file_path)
@@ -55,6 +56,28 @@ def run_tier1(path: str | Path, classification: ClassificationResult) -> TierRes
             }
             for ff in pdf_result.font_family_mismatches
         ]
+        for ff in pdf_result.font_family_mismatches:
+            structure_regions.append(
+                {
+                    "page_number": ff.page_number,
+                    "bbox_pts": list(ff.bbox_pts),
+                    "signal": "font_mismatch",
+                    "confidence": "medium",
+                    "note": f"Font '{ff.font_name}' deviates from document dominant",
+                }
+            )
+        for ff in pdf_result.font_style_variants:
+            structure_regions.append(
+                {
+                    "page_number": ff.page_number,
+                    "bbox_pts": list(ff.bbox_pts),
+                    "signal": "font_style_variant",
+                    # Typed government templates routinely use a bold accent font;
+                    # treat as advisory only, never a clickable box by itself.
+                    "confidence": "low",
+                    "note": f"Unexpected font style '{ff.font_name}' on '{ff.text[:24]}'",
+                }
+            )
         pdf_reasons, pdf_penalty = _pdf_reasons(pdf_result)
         reasons.extend(pdf_reasons)
         score -= pdf_penalty
@@ -74,6 +97,19 @@ def run_tier1(path: str | Path, classification: ClassificationResult) -> TierRes
             rev_reasons, rev_penalty = _revision_reasons(revision)
             reasons.extend(rev_reasons)
             score -= rev_penalty
+            for c in revision.recovered_changes:
+                structure_regions.append(
+                    {
+                        "page_number": c.page_number,
+                        "bbox_pts": list(c.bbox) if c.bbox else None,
+                        "signal": "revision_edit",
+                        "confidence": "high" if c.weight == "high" else "medium",
+                        "note": (
+                            f"Recovered revision edit — "
+                            f"{c.field_hint or 'field'}: {c.original_value} → {c.current_value}"
+                        ),
+                    }
+                )
         except Exception as exc:  # never let recovery sink the tier
             warnings.append(f"revision recovery failed: {exc}")
 
@@ -111,6 +147,8 @@ def run_tier1(path: str | Path, classification: ClassificationResult) -> TierRes
 
     if warnings:
         evidence["warnings"] = warnings
+    if structure_regions:
+        evidence["structure_regions"] = structure_regions
 
     return TierResult(
         name="tier1_structure_typography",

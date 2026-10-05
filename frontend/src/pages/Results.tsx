@@ -14,6 +14,7 @@ import { ScoreGauge } from "@/components/ScoreGauge";
 import { VerdictPill } from "@/components/VerdictPill";
 import { DocumentCard } from "@/components/DocumentCard";
 import { SeverityBadge } from "@/components/SeverityBadge";
+import { IncomeReconcileCard } from "@/components/IncomeReconcileCard";
 import { CardSkeleton, Skeleton } from "@/components/Skeleton";
 import { ErrorState } from "@/components/States";
 import { useToast } from "@/app/toast";
@@ -115,6 +116,11 @@ export function Results() {
           <p className="text-lg font-medium leading-relaxed text-slate-800 dark:text-slate-100">
             {overall.summary}
           </p>
+          <p className="pb-1">
+            <Link to={`/app/${jobId}`} className="text-sm font-semibold text-pipeline1 hover:underline">
+              Open applicant file workspace →
+            </Link>
+          </p>
           <div className="pt-1">
             <p className="mb-1.5 text-xs font-medium text-slate-400">
               System recommends — you decide:
@@ -172,6 +178,9 @@ export function Results() {
           </ul>
         </section>
       )}
+
+      {/* Income reconciliation (visual) */}
+      <IncomeReconcileCard documents={documents} />
 
       {/* Document cards */}
       <section>

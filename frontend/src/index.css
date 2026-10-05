@@ -20,6 +20,7 @@
   }
   /* Tabular numbers for scores / amounts */
   .tnum {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
     font-variant-numeric: tabular-nums;
   }
   *:focus-visible {

@@ -4,6 +4,8 @@ import { ArrowLeft, Filter } from "lucide-react";
 import { useResult } from "@/lib/useResult";
 import type { Severity, Signal } from "@/api/types";
 import { DocumentViewer } from "@/components/DocumentViewer";
+import { HeatmapCompare } from "@/components/HeatmapCompare";
+import { PageThumbs } from "@/components/PageThumbs";
 import { BeforeAfterPanel } from "@/components/BeforeAfterPanel";
 import { SignalCard } from "@/components/SignalCard";
 import { PipelineBadge } from "@/components/PipelineBadge";
@@ -34,6 +36,7 @@ export function DocumentDetail() {
   const { result, loading, error, reload } = useResult(jobId);
   const [minSeverity, setMinSeverity] = useState<Severity | "all">("all");
   const [activeRegionId, setActiveRegionId] = useState<string | null>(null);
+  const [activeHeatmap, setActiveHeatmap] = useState<string | null>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
 
   const doc = useMemo(
@@ -140,7 +143,12 @@ export function DocumentDetail() {
             doc={doc}
             activeRegionId={activeRegionId}
             onRegionClick={setActiveRegionId}
+            heatmapUrlOverride={activeHeatmap ?? undefined}
           />
+          <PageThumbs doc={doc} onSelect={setActiveHeatmap} />
+          {doc.pipeline1.heatmap_url && doc.preview_url && !/\.pdf$/i.test(doc.filename) && (
+            <HeatmapCompare doc={doc} />
+          )}
           <div className="flex gap-3 text-xs">
             <PipelineBadge pipeline={1} />
             <PipelineBadge pipeline={2} />

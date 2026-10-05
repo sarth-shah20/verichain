@@ -24,6 +24,18 @@ export function History() {
   const [tick, setTick] = useState(0);
   const [pendingDelete, setPendingDelete] = useState<HistoryItem | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [query, setQuery] = useState("");
+  const [verdictFilter, setVerdictFilter] = useState<string>("all");
+
+  const filtered = (items ?? []).filter((it) => {
+    const q = query.trim().toLowerCase();
+    const okQ =
+      !q ||
+      it.application_id.toLowerCase().includes(q) ||
+      (it.doc_names ?? "").toLowerCase().includes(q);
+    const okV = verdictFilter === "all" || it.verdict === verdictFilter;
+    return okQ && okV;
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -68,6 +80,26 @@ export function History() {
         </p>
       </header>
 
+      <div className="flex flex-wrap items-center gap-3">
+        <input
+          className="input w-full max-w-sm"
+          placeholder="Search application id or filename…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <select
+          className="input w-40"
+          value={verdictFilter}
+          onChange={(e) => setVerdictFilter(e.target.value)}
+        >
+          <option value="all">All verdicts</option>
+          <option value="genuine">Genuine</option>
+          <option value="review">Review</option>
+          <option value="high_risk">High risk</option>
+        </select>
+        <span className="text-xs text-slate-400">{filtered.length} result(s)</span>
+      </div>
+
       {error ? (
         <ErrorState description={error} onRetry={() => setTick((t) => t + 1)} />
       ) : items === null ? (
@@ -80,7 +112,7 @@ export function History() {
             </div>
           ))}
         </div>
-      ) : items.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <EmptyState
           icon={HistoryIcon}
           title="No verifications yet"
@@ -106,7 +138,7 @@ export function History() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {items.map((row) => (
+              {filtered.map((row) => (
                 <tr
                   key={row.job_id}
                   onClick={() => open(row.job_id)}
@@ -158,7 +190,7 @@ export function History() {
 
           {/* Mobile list */}
           <ul className="divide-y divide-slate-100 dark:divide-slate-800 sm:hidden">
-            {items.map((row) => (
+            {filtered.map((row) => (
               <li key={row.job_id} className="flex items-center gap-2 p-4">
                 <button
                   onClick={() => open(row.job_id)}

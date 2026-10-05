@@ -30,6 +30,7 @@ Thumbs.db
 
 # Uploads and generated files
 backend/uploads/
+backend/artifacts/
 ai/outputs/
 
 # Blockchain

@@ -64,6 +64,13 @@ def init() -> None:
                     "ALTER TABLE blockchain_log ADD COLUMN event_type TEXT "
                     "DEFAULT 'system_verdict'"
                 )
+            # Notes: persist underwriter justification for audit.
+            vcols = {r[1] for r in conn.execute("PRAGMA table_info(verifications)")}
+            if vcols and "note" not in vcols:
+                conn.execute("ALTER TABLE verifications ADD COLUMN note TEXT")
+            bcols = {r[1] for r in conn.execute("PRAGMA table_info(blockchain_log)")}
+            if bcols and "note" not in bcols:
+                conn.execute("ALTER TABLE blockchain_log ADD COLUMN note TEXT")
     except sqlite3.Error:
         # Never let store setup crash the app; persistence degrades gracefully.
         pass
@@ -156,8 +163,8 @@ def list_all() -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def record_decision(job_id: str, decision: str) -> dict[str, Any] | None:
-    """Save the underwriter's decision and append it to the audit log.
+def record_decision(job_id: str, decision: str, note: str | None = None) -> dict[str, Any] | None:
+    """Save the underwriter's decision + note and append it to the audit log.
 
     Returns {tx_hash, timestamp} on success, or None if the job isn't persisted.
     """
@@ -172,8 +179,8 @@ def record_decision(job_id: str, decision: str) -> dict[str, Any] | None:
             applicant_id = row["applicant_id"]
 
             conn.execute(
-                "UPDATE verifications SET underwriter_decision = ? WHERE job_id = ?",
-                (decision, job_id),
+                "UPDATE verifications SET underwriter_decision = ?, note = ? WHERE job_id = ?",
+                (decision, note, job_id),
             )
 
             ts = datetime.now(timezone.utc).isoformat()
@@ -184,9 +191,9 @@ def record_decision(job_id: str, decision: str) -> dict[str, Any] | None:
             # default 'system_verdict' event_type. The audit log is append-only.
             conn.execute(
                 "INSERT INTO blockchain_log "
-                "(applicant_id, doc_hash, risk_score, decision, timestamp, tx_hash, event_type) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (applicant_id, job_id, None, decision, ts, tx_hash, "underwriter_decision"),
+                "(applicant_id, doc_hash, risk_score, decision, timestamp, tx_hash, event_type, note) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (applicant_id, job_id, None, decision, ts, tx_hash, "underwriter_decision", note),
             )
         return {"tx_hash": tx_hash, "timestamp": ts}
     except sqlite3.Error:

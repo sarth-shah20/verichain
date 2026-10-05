@@ -183,11 +183,11 @@ export class RealVeriChainApi implements VeriChainApi {
     }));
   }
 
-  async recordDecision(jobId: string, decision: UnderwriterDecision): Promise<void> {
+  async recordDecision(jobId: string, decision: UnderwriterDecision, note?: string | null): Promise<void> {
     const res = await fetch(this.url(`/verify/batch/${encodeURIComponent(jobId)}/decision`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ decision }),
+      body: JSON.stringify({ decision, note: note ?? undefined }),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");

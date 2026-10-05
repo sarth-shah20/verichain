@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Eye, EyeOff, ImageOff } from "lucide-react";
-import type { DocumentResult, Region } from "@/api/types";
+import type { DocumentResult, Region, Severity } from "@/api/types";
 import { cx } from "@/lib/format";
 
 interface RegionMarker {
@@ -8,13 +8,23 @@ interface RegionMarker {
   region: Region;
   label: string;
   pipeline: 1 | 2;
+  severity: Severity;
 }
+
+const SEVERITY_COLOR: Record<Severity, string> = {
+  high: "#dc2626",
+  medium: "#f59e0b",
+  low: "#0d9488",
+  info: "#64748b",
+};
 
 interface DocumentViewerProps {
   doc: DocumentResult;
   /** Currently highlighted region id (e.g. clicked from a signal). */
   activeRegionId?: string | null;
   onRegionClick?: (id: string) => void;
+  /** Override the heatmap source (e.g. a selected page thumb). */
+  heatmapUrlOverride?: string | null;
 }
 
 /**
@@ -26,46 +36,63 @@ export function DocumentViewer({
   doc,
   activeRegionId,
   onRegionClick,
+  heatmapUrlOverride,
 }: DocumentViewerProps) {
   const [showOverlay, setShowOverlay] = useState(true);
+  const [showHeatmap, setShowHeatmap] = useState(true);
 
+  const heatmapUrl = heatmapUrlOverride !== undefined ? heatmapUrlOverride : (doc.pipeline1.heatmap_url ?? null);
   // A PDF upload renders in an embedded viewer; images (and forensic heatmaps)
-  // render as a bitmap with clickable region overlays.
+  // render as a bitmap with clickable region overlays. The heatmap takes
+  // precedence when present — it IS the document view with tamper intensity
+  // baked in, plus the box overlay below.
   const isPdf = /\.pdf$/i.test(doc.filename);
   const pdfSrc = isPdf ? (doc.preview_url ?? null) : null;
-  // Prefer the forensic heatmap when present, otherwise the real preview, then
-  // the card thumbnail as a last resort.
-  const imageSrc =
-    doc.pipeline1.heatmap_url ?? (isPdf ? null : (doc.preview_url ?? doc.thumbnail_url));
+  const originalSrc = isPdf ? null : (doc.preview_url ?? doc.thumbnail_url);
+  const imageSrc = showHeatmap && heatmapUrl ? heatmapUrl : originalSrc;
+  // Show the iframe only when there is no heatmap to display (or the user
+  // toggled back to the original document and it is a PDF).
+  const showIframe = !imageSrc && !!pdfSrc;
   const markers = collectRegions(doc);
 
   return (
     <div className="card overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-slate-800">
         <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-          Document {doc.pipeline1.heatmap_url ? "· heatmap" : "preview"}
+          Document {heatmapUrl ? (showHeatmap ? "· heatmap" : "· original") : "preview"}
         </h3>
-        {markers.length > 0 && (
-          <button
-            onClick={() => setShowOverlay((v) => !v)}
-            className="btn-ghost px-2 py-1 text-xs"
-            aria-pressed={showOverlay}
-          >
-            {showOverlay ? (
-              <>
-                <EyeOff className="h-4 w-4" /> Hide regions
-              </>
-            ) : (
-              <>
-                <Eye className="h-4 w-4" /> Show regions
-              </>
-            )}
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {heatmapUrl && (pdfSrc || originalSrc) && (
+            <button
+              onClick={() => setShowHeatmap((v) => !v)}
+              className="btn-ghost px-2 py-1 text-xs"
+              aria-pressed={showHeatmap}
+            >
+              {showHeatmap ? "View original" : "View heatmap"}
+            </button>
+          )}
+          {markers.length > 0 && imageSrc && (
+            <button
+              onClick={() => setShowOverlay((v) => !v)}
+              className="btn-ghost px-2 py-1 text-xs"
+              aria-pressed={showOverlay}
+            >
+              {showOverlay ? (
+                <>
+                  <EyeOff className="h-4 w-4" /> Hide regions
+                </>
+              ) : (
+                <>
+                  <Eye className="h-4 w-4" /> Show regions
+                </>
+              )}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="relative bg-slate-100 dark:bg-slate-800">
-        {pdfSrc ? (
+        {showIframe ? (
           <iframe
             src={pdfSrc}
             title={`Document ${doc.filename}`}
@@ -75,7 +102,7 @@ export function DocumentViewer({
           <img
             src={imageSrc}
             alt={`Document ${doc.filename}${
-              doc.pipeline1.heatmap_url ? " with forensic heatmap" : ""
+              showHeatmap && heatmapUrl ? " with forensic heatmap" : ""
             }`}
             className="block w-full"
           />
@@ -90,7 +117,7 @@ export function DocumentViewer({
           imageSrc &&
           markers.map((m) => {
             const active = activeRegionId === m.id;
-            const color = m.pipeline === 1 ? "#0d9488" : "#4f46e5";
+            const color = m.pipeline === 1 ? (SEVERITY_COLOR[m.severity] ?? "#0d9488") : "#4f46e5";
             return (
               <button
                 key={m.id}
@@ -125,7 +152,7 @@ export function DocumentViewer({
       {markers.length > 0 && (
         <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
           {markers.length} flagged region{markers.length > 1 ? "s" : ""} ·
-          teal = authenticity, indigo = content. Click a box to read its reason.
+          red = high, amber = medium, teal = low, indigo = content. Click a box to read its reason.
         </p>
       )}
     </div>
@@ -136,11 +163,11 @@ function collectRegions(doc: DocumentResult): RegionMarker[] {
   const out: RegionMarker[] = [];
   doc.pipeline1.signals.forEach((s, i) => {
     if (s.region)
-      out.push({ id: `p1-${i}`, region: s.region, label: s.label, pipeline: 1 });
+      out.push({ id: `p1-${i}`, region: s.region, label: s.label, pipeline: 1, severity: s.severity });
   });
   doc.pipeline2.signals.forEach((s, i) => {
     if (s.region)
-      out.push({ id: `p2-${i}`, region: s.region, label: s.label, pipeline: 2 });
+      out.push({ id: `p2-${i}`, region: s.region, label: s.label, pipeline: 2, severity: s.severity });
   });
   return out;
 }

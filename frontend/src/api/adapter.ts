@@ -56,6 +56,14 @@ export interface BackendRevisionEvidence {
   changes: BackendRevisionChange[];
 }
 
+export interface BackendSuspectRegion {
+  page: number;
+  bbox_pct: { x: number; y: number; w: number; h: number };
+  confidence: string;
+  signals: string[];
+  note: string;
+}
+
 export interface BackendVerifyResponse {
   /** AUTHENTICITY score, 0–100 (higher = more genuine). */
   risk_score: number;
@@ -67,6 +75,10 @@ export interface BackendVerifyResponse {
   field_verification: BackendFieldVerification;
   /** Additive (batch only): recovered before/after PDF-revision evidence. */
   revision_evidence?: BackendRevisionEvidence | null;
+  /** Additive: pixel-forensic suspect boxes in viewer-ready percent coords. */
+  suspect_regions?: BackendSuspectRegion[] | null;
+  /** Additive: per-page heatmap artifacts ({page_number, url}). */
+  heatmap_pages?: { page_number: number; url: string }[] | null;
 }
 
 export interface BackendHistoryEvent {
@@ -307,6 +319,26 @@ function mapDocument(input: DocInput, apiBase: string): DocumentResult {
     });
   }
 
+  // Forensic suspect boxes → viewer overlay regions (percent coords).
+  // High = red boxes, medium = amber, low = teal. Lows are included so the
+  // overlay matches the heat tint, but the severity filter can hide them.
+  const suspectToSeverity = (c: string): Signal["severity"] =>
+    c === "high" ? "high" : c === "medium" ? "medium" : "low";
+  for (const r of resp.suspect_regions ?? []) {
+    const pct = r.bbox_pct;
+    if (!pct || pct.w <= 0 || pct.h <= 0) continue;
+    // Lows stay visible as heat tint on the PNG itself; only high/medium get
+    // clickable boxes so a busy typed page isn't buried under teal rectangles.
+    if (r.confidence !== "high" && r.confidence !== "medium") continue;
+    p1Signals.push({
+      family: "image",
+      label: `${r.confidence}: ${r.signals.slice(0, 2).join("+")}`,
+      severity: suspectToSeverity(r.confidence),
+      reason: r.note || `Flagged by ${r.signals.join(", ")}.`,
+      region: { x: pct.x, y: pct.y, w: pct.w, h: pct.h },
+    });
+  }
+
   // Recovered before/after PDF-revision evidence (the killer edited-PDF signal).
   const revisionEvidence: RevisionEvidence | null =
     resp.revision_evidence && resp.revision_evidence.detected
@@ -379,6 +411,10 @@ function mapDocument(input: DocInput, apiBase: string): DocumentResult {
     pipeline1: {
       score: trustScore,
       heatmap_url: heatmap,
+      heatmap_pages: (resp.heatmap_pages ?? []).map((p) => ({
+        page_number: p.page_number,
+        url: resolveHeatmap(p.url, apiBase),
+      })),
       signals: p1Signals,
     },
     pipeline2: {

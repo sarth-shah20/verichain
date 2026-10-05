@@ -59,6 +59,8 @@ export interface Pipeline1Report {
   /** Authenticity & forensics, normalised 0–100. */
   score: number;
   heatmap_url: string | null;
+  /** Per-page heatmaps (present when multipage rendering was possible). */
+  heatmap_pages?: { page_number: number; url: string | null }[];
   signals: Signal[];
 }
 
@@ -168,6 +170,6 @@ export interface VeriChainApi {
   getStatus(jobId: string): Promise<JobStatusResponse>;
   getResult(jobId: string): Promise<VerificationResult>;
   getHistory(): Promise<HistoryItem[]>;
-  recordDecision(jobId: string, decision: UnderwriterDecision): Promise<void>;
+  recordDecision(jobId: string, decision: UnderwriterDecision, note?: string | null): Promise<void>;
   deleteVerification(jobId: string): Promise<void>;
 }

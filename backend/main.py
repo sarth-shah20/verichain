@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -33,6 +34,15 @@ from routes.history import router as history_router
 app.include_router(batch_router)  # /verify/batch — register before /verify
 app.include_router(verify_router)
 app.include_router(history_router)  # /verifications
+
+# Forensic heatmap PNGs (see artifacts.py). Served as static files; URLs look
+# like /artifacts/{job_id}/doc_0_heatmap_p1.png and are stored in heatmap_url.
+try:
+    import artifacts as _artifacts
+
+    app.mount("/artifacts", StaticFiles(directory=_artifacts.artifacts_dir()), name="artifacts")
+except Exception:
+    pass  # artifacts degrade gracefully — heatmap_url stays None
 
 
 @app.get("/")

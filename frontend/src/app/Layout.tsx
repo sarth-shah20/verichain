@@ -7,11 +7,13 @@ import {
   Moon,
   Sun,
   CircleUserRound,
+  ListChecks,
 } from "lucide-react";
 import { useTheme } from "./theme";
 import { cx } from "@/lib/format";
 
 const NAV = [
+  { to: "/queue", label: "Queue", icon: ListChecks },
   { to: "/new", label: "New Verification", icon: FilePlus2 },
   { to: "/history", label: "History", icon: HistoryIcon },
   { to: "/settings", label: "Settings", icon: Settings },

@@ -38,6 +38,9 @@ try:
     from pipeline1.provenance.tier0 import run_tier0
     from pipeline1.structure.tier1 import run_tier1
     from pipeline1.pixel_forensics.tier2 import run_tier2
+    from pipeline1.tamper_map.tier3 import run_tier3
+    from pipeline1.tamper_map.heatmap import generate_heatmap_pages
+    from pipeline1.schema import PixelForensicsResult, SuspectRegion
     _P1_AVAILABLE = True
 except ImportError:
     _P1_AVAILABLE = False
@@ -102,7 +105,15 @@ class VerifyResponse(BaseModel):
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _run_pipeline1(file_path: str) -> dict[str, Any]:
-    """Run forensics pipeline. Returns a serialisable dict for fusion."""
+    """Run forensics pipeline. Returns a serialisable dict for fusion.
+
+    Adds (additive, fusion-safe):
+      - advisory_spectral (Tier 3: spectral corroboration, previously dead code)
+      - heatmap_pages: [{page_number, png_bytes, image_w/h, regions[]}] — PNG
+        bytes are kept OUT of the fusion dict (binary); process_document lifts
+        them out before fusion/store. Only URLs + pct boxes reach the API.
+      - suspect_regions: flat pct boxes across pages for the viewer overlay.
+    """
     if not _P1_AVAILABLE:
         return {"error": "pipeline1 not available", "tiers": []}
 
@@ -126,21 +137,148 @@ def _run_pipeline1(file_path: str) -> dict[str, Any]:
             "overall_authenticity_score": min(t["authenticity_score"] for t in reliable),
         }
 
-        # Tier 2 = pixel forensics (copy-move/DCT/ELA). These are designed for
-        # natural photographs and false-positive heavily on typed / born-digital
-        # government e-records (repeated glyphs, table grids, seals, uniform
-        # fills). Keep their findings for transparency, but mark them ADVISORY so
-        # they neither tank the authenticity score nor drive the fused verdict on
-        # their own — fusion is instructed to treat them as low-confidence.
+        # Tier 2 = pixel forensics (copy-move/DCT/ELA/noise/ghost). These are
+        # designed for natural photographs and false-positive heavily on typed /
+        # born-digital government e-records (repeated glyphs, table grids,
+        # seals, uniform fills). Keep their findings for transparency, but mark
+        # them ADVISORY so they neither tank the authenticity score nor drive
+        # the fused verdict on their own — fusion treats them as low-confidence.
+        pixel_result_obj = None
         if tier2 is not None:
             advisory = tier2.model_dump()
             advisory["advisory_note"] = (
-                "Pixel forensics (copy-move/DCT/ELA) are unreliable on typed / "
-                "born-digital e-records and frequently false-positive on repeated "
-                "text, table grids and seals. Treat as advisory, NOT decisive."
+                "Pixel forensics (copy-move/DCT/ELA/noise/JPEG-ghost) are unreliable "
+                "on typed / born-digital e-records and frequently false-positive on "
+                "repeated text, table grids and seals. Treat as advisory, NOT decisive."
             )
             result["advisory_pixel_forensics"] = advisory
+            try:
+                pixel_result_obj = PixelForensicsResult(**tier2.evidence)
+            except Exception:
+                pixel_result_obj = None
 
+        # Tier 3 = spectral corroboration (previously wired nowhere). Runs for
+        # scans AND born-digital PDFs with embedded images; promotes Tier 2
+        # regions it overlaps to high confidence in place.
+        tier3 = None
+        try:
+            tier3 = run_tier3(file_path, classification, pixel_result_obj)
+            result["advisory_spectral"] = tier3.model_dump()
+            # Propagate corroboration back into the advisory pixel evidence so
+            # heatmap boxes + fusion see the promoted confidence.
+            if pixel_result_obj is not None and tier3.evidence:
+                try:
+                    # pixel_result_obj.suspect_regions are already SuspectRegion
+                    # objects; tier3 mutated overlapping ones to high in place.
+                    merged = list(pixel_result_obj.suspect_regions)
+                    seen = {(r.page_number, tuple(r.bbox)) for r in merged}
+                    for c in (tier3.evidence.get("corroborated_regions") or []):
+                        key = (c.get("page_number"), tuple(c.get("bbox", ())))
+                        if key not in seen:
+                            from pipeline1.schema import SuspectRegion as _SR
+
+                            merged.append(_SR(**c))
+                            seen.add(key)
+                    for s in (tier3.evidence.get("suspect_regions") or []):
+                        key = (s.get("page_number"), tuple(s.get("bbox", ())))
+                        if key not in seen:
+                            from pipeline1.schema import SuspectRegion as _SR
+
+                            merged.append(_SR(**s))
+                            seen.add(key)
+                    # NOTE: TierResult.model_dump() nests the pixel payload under
+                    # ["evidence"] — update that path, not the top level.
+                    result["advisory_pixel_forensics"]["evidence"]["suspect_regions"] = [
+                        r.model_dump() for r in merged
+                    ]
+                except Exception:
+                    pass
+        except Exception as exc:
+            result["advisory_spectral"] = {"error": str(exc)}
+
+        # Heatmap pages (PNG bytes + pct boxes). Never let render sink the run.
+        heatmap_pages: list[dict[str, Any]] = []
+        suspect_regions: list[dict[str, Any]] = []
+        try:
+            from pipeline1.common.page_render import RENDER_ZOOM
+
+            regions_by_page: dict[int, list] = {}
+            adv = result.get("advisory_pixel_forensics") or {}
+            adv_evidence = adv.get("evidence") or {}
+            for r in adv_evidence.get("suspect_regions", []) or []:
+                try:
+                    sr = SuspectRegion(**r)
+                    regions_by_page.setdefault(sr.page_number, []).append(sr)
+                except Exception:
+                    continue
+
+            # Born-digital / signed PDFs: localized from STRUCTURE (tier1 font +
+            # revision boxes, converted from PDF points to render pixels),
+            # plus Tier 3 spectral boxes. This is the trustworthy "where edited"
+            # signal for typed PDFs where full-page pixel forensics is advisory.
+            t1_evidence = {}
+            for t in result.get("tiers", []):
+                if t.get("name") == "tier1_structure_typography":
+                    t1_evidence = t.get("evidence") or {}
+                    break
+            for sr_dict in t1_evidence.get("structure_regions", []) or []:
+                try:
+                    pts = sr_dict.get("bbox_pts")
+                    page_no = int(sr_dict.get("page_number", 0))
+                    page_key = page_no + 1 if page_no == 0 else page_no
+                    if not pts:
+                        # revision edits without a precise box: use full-page band
+                        continue
+                    x0, y0, x1, y1 = [float(v) for v in pts]
+                    if x1 <= x0 or y1 <= y0:
+                        continue
+                    z = float(RENDER_ZOOM)
+                    boxed = SuspectRegion(
+                        page_number=page_key,
+                        bbox=(
+                            int(round(x0 * z)),
+                            int(round(y0 * z)),
+                            int(round((x1 - x0) * z)),
+                            int(round((y1 - y0) * z)),
+                        ),
+                        contributing_signals=[sr_dict.get("signal", "structure")],
+                        confidence=sr_dict.get("confidence", "medium"),
+                        note=sr_dict.get("note", ""),
+                    )
+                    regions_by_page.setdefault(boxed.page_number, []).append(boxed)
+                except Exception:
+                    continue
+
+            # Spectral standalone lows also deserve heat tint.
+            spec = (result.get("advisory_spectral") or {}).get("evidence") or {}
+            for r in spec.get("suspect_regions", []) or []:
+                try:
+                    sr = SuspectRegion(**r)
+                    lst = regions_by_page.setdefault(sr.page_number, [])
+                    if all(tuple(x.bbox) != tuple(sr.bbox) for x in lst):
+                        lst.append(sr)
+                except Exception:
+                    continue
+
+            if regions_by_page:
+                heatmap_pages = generate_heatmap_pages(file_path, regions_by_page)
+                for pg in heatmap_pages:
+                    for reg in pg.get("regions", []):
+                        suspect_regions.append(
+                            {
+                                "page": pg["page_number"],
+                                "bbox_pct": reg["bbox_pct"],
+                                "confidence": reg["confidence"],
+                                "signals": reg["signals"],
+                                "note": reg["note"],
+                            }
+                        )
+        except Exception:
+            heatmap_pages = []
+            suspect_regions = []
+
+        result["_heatmap_pages"] = heatmap_pages  # stripped before fusion/store
+        result["suspect_regions"] = suspect_regions
         return result
     except Exception as exc:
         return {"error": str(exc), "tiers": []}
@@ -282,6 +420,8 @@ def _holistic_to_api(
     verification_report: dict,
     document_type: str,
     revision_evidence: dict | None = None,
+    forensics_report: dict | None = None,
+    heatmap_url: str | None = None,
 ) -> dict[str, Any]:
     """Map a fused holistic report → the frozen API fields (shared by the
     single-doc endpoint and the batch job).
@@ -291,6 +431,18 @@ def _holistic_to_api(
     """
     fusion_risk = int(holistic.get("fusion", {}).get("overall_risk_score", 50))
     risk_score = 100 - fusion_risk
+
+    # Band-edge polish: never route to auto_approve on advisory-only forensics
+    # with no DB-of-record confirmation. If the document is unverified and there
+    # are no corroborated suspects, pin the decision at human_review.
+    try:
+        no_db = ((verification_report.get("verification") or {}).get("match_status") in (None, "unverified"))
+        adv = (forensics_report or {}).get("advisory_pixel_forensics") or {}
+        no_suspects = not (adv.get("evidence") or {}).get("suspect_regions")
+        if no_db and no_suspects and risk_score >= 80:
+            risk_score = 79
+    except Exception:
+        pass
     route_taken, decision = _decide(risk_score)
 
     reasons = [
@@ -314,15 +466,30 @@ def _holistic_to_api(
         "route_taken": route_taken,
         "decision": decision,
         "reasons": reasons,
-        "heatmap_url": None,
+        "heatmap_url": heatmap_url,
         "field_verification": field_ver.dict(),
         "extracted_fields": extracted,
     }
     # Additive only — the frozen single-doc VerifyResponse ignores unknown keys;
     # the batch job spreads `api` into its per-document result, so this surfaces
-    # the before/after panel there without touching the frozen schema.
+    # the before/after panel + viewer overlay boxes there without touching the
+    # frozen schema.
     if revision_evidence:
         api["revision_evidence"] = revision_evidence
+    if forensics_report is not None:
+        suspect = forensics_report.get("suspect_regions") or []
+        if suspect:
+            api["suspect_regions"] = suspect
+            top = next((r for r in suspect if r.get("confidence") == "high"), None)
+            if top is None:
+                top = next((r for r in suspect if r.get("confidence") == "medium"), None)
+            if top is not None:
+                api["top_suspect"] = {
+                    "confidence": top.get("confidence"),
+                    "signals": top.get("signals"),
+                    "bbox_pct": top.get("bbox_pct"),
+                    "note": top.get("note"),
+                }
     return api
 
 
@@ -332,6 +499,10 @@ def process_document(file_bytes: bytes, document_type: str) -> dict[str, Any]:
     Returns the raw pipeline reports (needed for cross-document analysis) plus
     an `api` dict in the frozen contract's field shape. Reused by /verify and
     the batch job — keep it free of HTTP / blockchain concerns.
+
+    Heatmap PNG bytes are returned separately (`heatmap_pages`) so callers can
+    persist them to /artifacts and set heatmap_url; they never enter the fusion
+    input or the stored job JSON.
     """
     suffix = ".pdf" if file_bytes[:4] == b"%PDF" else ".jpg"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -340,6 +511,8 @@ def process_document(file_bytes: bytes, document_type: str) -> dict[str, Any]:
 
     try:
         forensics_report = _run_pipeline1(tmp_path)
+        # Binary PNGs must not reach the LLM fusion prompt or the SQLite payload.
+        heatmap_pages = forensics_report.pop("_heatmap_pages", []) or []
         p2_doc_type = _DOC_TYPE_MAP.get(document_type)
         verification_report = p2_pipeline.verify_document_file(
             tmp_path, doc_type=p2_doc_type
@@ -358,8 +531,10 @@ def process_document(file_bytes: bytes, document_type: str) -> dict[str, Any]:
         "forensics_report": forensics_report,
         "holistic": holistic,
         "revision_evidence": revision_evidence,
+        "heatmap_pages": heatmap_pages,
         "api": _holistic_to_api(
-            holistic, verification_report, document_type, revision_evidence
+            holistic, verification_report, document_type, revision_evidence,
+            forensics_report=forensics_report,
         ),
         "doc_hash": hashlib.sha256(file_bytes).hexdigest(),
     }
@@ -380,6 +555,18 @@ def verify(req: VerifyRequest) -> VerifyResponse:
         raise HTTPException(status_code=500, detail=f"Pipeline error: {exc}")
 
     api = out["api"]
+    # Persist the first heatmap page for the frozen single-doc contract.
+    try:
+        import artifacts as _artifacts
+
+        pages = out.get("heatmap_pages") or []
+        if pages:
+            first = pages[0]
+            api["heatmap_url"] = _artifacts.save_single_heatmap(
+                out["doc_hash"], first["page_number"], first["png_bytes"]
+            )
+    except Exception:
+        pass
     tx_hash = _log_blockchain(
         req.applicant_id, out["doc_hash"], api["risk_score"], api["decision"]
     )

@@ -55,13 +55,19 @@ Scoring guidance (0 = clean, 100 = almost certainly fraudulent):
   identifier checks AND arithmetic-reconciliation checks. A failed PAN structure/
   holder-type check, a failed Aadhaar Verhoeff checksum, a failed GSTIN checksum/
   state-code check, a GSTIN whose embedded PAN is not the applicant's PAN, or a
-  payslip whose gross pay minus deductions does not equal its stated net pay,
-  means the value is fabricated/edited — treat these as HIGH weight and raise the
-  score sharply even without a pixel signal, and EVEN WHEN the document has no
-  DB-of-record match (a payslip has no issuer database by design; the arithmetic
-  check IS its verification). (These arrive in the verification report's
-  "deterministic_checks" and as discrepancies tagged with the check name in
-  brackets.)
+  failed payslip arithmetic check (gross - deductions != net pay), where the
+  value is fabricated/edited -> HIGH risk, no re-weighting downward allowed.
+  Treat these as HIGH weight and raise the score sharply even without a pixel
+  signal, and EVEN WHEN the document has no DB-of-record match (a payslip has
+  no issuer database by design; the arithmetic check IS its verification).
+  (These arrive in the verification report's "deterministic_checks" and as
+  discrepancies tagged with the check name in brackets.)
+- A cross-document discrepancy is HARD evidence too, even when every document
+  individually verifies ("unverified" counts as individual status). Income
+  understatement across documents (payslip annualized vs ITR, >15% gap) or
+  identity/PAN conflict must push the overall score HIGH regardless of how
+  clean each single document looked. Never return LOW risk when a HIGH-severity
+  cross-document flag exists; align per-document flags you cite with them.
 - FIELD-WEIGHTED risk: weight WHICH field was edited/mismatched, mirroring how a
   human underwriter reads fraud. In descending order of severity:
     1. Identity & money fields — name, PAN, Aadhaar, account number, GSTIN,

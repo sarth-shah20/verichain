@@ -19,6 +19,7 @@ concurrently within it.
 from __future__ import annotations
 
 import base64
+import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Thread
@@ -185,6 +186,7 @@ def _process_one(doc: BatchDocument) -> dict[str, Any]:
             "ok": True,
             "verification_report": out["verification_report"],
             "doc_hash": out["doc_hash"],
+            "heatmap_pages": out.get("heatmap_pages") or [],
             "doc": {
                 "filename": doc.filename or "document",
                 "document_type": doc.document_type,
@@ -229,6 +231,29 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
                 jobs.update(job_id, progress=int(done / total * 80))
 
         ordered = [results[i] for i in range(total)]
+        # Persist heatmap PNGs now that job_id + doc index are known. Binary
+        # stays on disk; only the URL travels in the stored job JSON.
+        try:
+            import artifacts as _artifacts
+
+            for idx, r in enumerate(ordered):
+                pages = r.get("heatmap_pages") or []
+                if not pages:
+                    continue
+                saved = []
+                for pg in pages[:3]:
+                    try:
+                        url = _artifacts.save_heatmap(
+                            job_id, idx, pg["page_number"], pg["png_bytes"]
+                        )
+                        saved.append({"page_number": pg["page_number"], "url": url})
+                    except Exception:
+                        continue
+                if saved:
+                    r["doc"]["heatmap_url"] = saved[0]["url"]
+                    r["doc"]["heatmap_pages"] = saved
+        except Exception:
+            pass
         documents_out = [r["doc"] for r in ordered]
 
         # Blockchain audit log per document.
@@ -296,6 +321,7 @@ def create_batch(req: BatchVerifyRequest) -> BatchJobResponse:
 
 class DecisionRequest(BaseModel):
     decision: str  # "approved" | "review" | "rejected"
+    note: str | None = None
 
 
 _VALID_DECISIONS = {"approved", "review", "rejected"}
@@ -317,12 +343,106 @@ def get_batch(job_id: str, response: Response) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="Unknown job id.")
 
 
+@router.get("/{job_id}/report.pdf")
+def export_report(job_id: str):
+    """Printable/audit PDF for one verification (additive route)."""
+    job = jobs.get(job_id) or store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown job id.")
+    try:
+        import artifacts as _a
+
+        out_dir = _a.ensure_dir(job_id)
+        out_path = out_dir / "report.pdf"
+        _render_report_pdf(job, str(out_path))
+        from fastapi.responses import FileResponse
+
+        return FileResponse(str(out_path), media_type="application/pdf", filename=f"verichain_{job_id}_report.pdf")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Report failed: {exc}")
+
+
+def _render_report_pdf(job: dict[str, Any], out_path: str) -> None:
+    import fitz
+
+    doc = fitz.open()
+    page = doc.new_page()
+    y = 50.0
+
+    def line(text: str, size: float = 10, bold: bool = False):
+        nonlocal y, page
+        try:
+            # Wrap before truncating — no mid-word chopping, and long reason
+            # lists flow onto continued lines instead of disappearing.
+            parts = [text[i : i + 90] for i in range(0, len(text), 90)] or [""]
+            for p in parts:
+                if y > 780:
+                    page = doc.new_page()
+                    y = 50.0
+                try:
+                    page.insert_text((50, y), p, fontsize=size, fontname="helv" if not bold else "helv-bold")
+                except Exception:
+                    page.insert_text((50, y), p, fontsize=size)
+                y += size + 8
+        except Exception:
+            y += size + 8
+
+    line("VeriChain — Verification Report", 16, True)
+    y += 6
+    line(f"Application: {job.get('applicant_id', '—')}  |  Docs: {job.get('document_count', 0)}", 10)
+    line(f"Submitted: {job.get('submitted_at', '—')}", 10)
+    ov = job.get("overall") or {}
+    line(f"Overall: risk {ov.get('risk_score', '—')} | {ov.get('decision', '—')} | {ov.get('route_taken', '')}", 11, True)
+    y += 4
+    line("Top reasons:", 11, True)
+    for r in (ov.get("reasons") or [])[:5]:
+        line(f"  • {r}", 9)
+    if job.get("cross_document"):
+        y += 4
+        line("Cross-document findings:", 11, True)
+        for c in job["cross_document"][:6]:
+            line(f"  • [{c.get('severity','?')}] {c.get('label')}", 9)
+    y += 4
+    line("Documents:", 11, True)
+    for d in job.get("documents", [])[:8]:
+        line(f"  • {d.get('filename','doc')} — {d.get('document_type','?')} — score {d.get('risk_score','?')} ({d.get('decision','?')})", 9)
+        ev = (d.get("extracted_fields") or {})
+        if ev:
+            try:
+                sample = ", ".join(f"{k}={v}" for k, v in list(ev.items())[:5])
+                line(f"      fields: {sample}", 8)
+            except Exception:
+                pass
+    # Embed first heatmap per document when present.
+    for d in job.get("documents", [])[:4]:
+        url = d.get("heatmap_url")
+        if not url:
+            continue
+        rel = url.lstrip("/")
+        base = os.path.dirname(os.path.abspath(__file__))
+        fs_path = os.path.normpath(os.path.join(base, "..", rel.replace("artifacts", "artifacts", 1)))
+        # artifacts live under backend/artifacts
+        candidate = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", *rel.split("/")[1:])
+        candidate = os.path.normpath(candidate)
+        for p in (candidate, fs_path):
+            if os.path.exists(p):
+                try:
+                    hp = doc.new_page()
+                    hp.insert_text((50, 40), f"Heatmap — {d.get('filename','doc')}", fontsize=10, fontname="helv-bold")
+                    hp.insert_image(fitz.Rect(50, 60, 545, 760), filename=p)
+                except Exception:
+                    pass
+                break
+    doc.save(out_path)
+    doc.close()
+
+
 @router.post("/{job_id}/decision")
 def record_decision(job_id: str, req: DecisionRequest) -> dict[str, Any]:
     """Record the underwriter's final decision (persisted + written to audit log)."""
     if req.decision not in _VALID_DECISIONS:
         raise HTTPException(status_code=400, detail="Invalid decision.")
-    result = store.record_decision(job_id, req.decision)
+    result = store.record_decision(job_id, req.decision, req.note)
     if result is None:
         raise HTTPException(status_code=404, detail="Verification not found.")
     # Keep the in-memory job (if still live) in sync so a poll reflects it.
