@@ -16,10 +16,15 @@ import json
 import mimetypes
 import os
 import re
+import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 
 import config
+
+_MODEL_SLOTS = threading.BoundedSemaphore(max(1, int(os.getenv("LLM_CONCURRENCY", "1"))))
+_RETRIES = max(0, min(2, int(os.getenv("LLM_RETRIES", "2"))))
 
 
 @dataclass
@@ -153,8 +158,28 @@ def _invoke(messages: list[dict], json_mode: bool) -> str:
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
 
-    resp = litellm.completion(**kwargs)
-    return resp["choices"][0]["message"]["content"]
+    kwargs["num_retries"] = 0
+    with _MODEL_SLOTS:
+        for attempt in range(_RETRIES + 1):
+            try:
+                resp = litellm.completion(**kwargs)
+                return resp["choices"][0]["message"]["content"]
+            except Exception as exc:
+                status = getattr(exc, "status_code", None)
+                transient = status in {429, 500, 502, 503, 504} or type(exc).__name__ in {"Timeout", "APIConnectionError"}
+                if not transient or attempt == _RETRIES:
+                    raise
+                headers = getattr(getattr(exc, "response", None), "headers", {}) or {}
+                try:
+                    delay = max(0.0, float(headers.get("retry-after", 2 ** (attempt + 1))))
+                except (ValueError, TypeError):
+                    delay = 2 ** (attempt + 1)
+                # Long provider delays surface as incomplete analysis rather than
+                # holding the classroom request indefinitely or retrying early.
+                if delay > 30:
+                    raise
+                time.sleep(delay)
+    raise RuntimeError("Model request did not complete")
 
 
 def call_text(system: str, user: str, *, json_mode: bool = True):

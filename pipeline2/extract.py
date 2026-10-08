@@ -176,14 +176,13 @@ def extract_document(path: str, doc_type: str | None = None) -> dict[str, Any]:
     Returns a dict with doc_type, language, full_text, fields, and the schema
     used (for downstream DB lookup + verification).
     """
-    media = utils.load_media(path)
-
     # Pass 1 — full content + classification (no length cap; preserve everything).
-    fulltext = _coerce_fulltext(
-        llm_client.call_vision(
-            _FULLTEXT_SYSTEM, _build_fulltext_prompt(doc_type), media, json_mode=True
+    with utils.document_media(path) as media:
+        fulltext = _coerce_fulltext(
+            llm_client.call_vision(
+                _FULLTEXT_SYSTEM, _build_fulltext_prompt(doc_type), media, json_mode=True
+            )
         )
-    )
     detected = fulltext.get("doc_type")
     resolved_type = (
         detected if (doc_type is None and detected in schemas.SCHEMAS and detected != "unknown")
@@ -222,6 +221,14 @@ def extract_document(path: str, doc_type: str | None = None) -> dict[str, Any]:
         "label": schema["label"],
     }
     result["_source_path"] = path
+    required = schema.get("key_fields", [])
+    warnings = []
+    if not full_text.strip():
+        warnings.append("No readable document text was recovered.")
+    missing = [k for k in required if result["fields"].get(k) in (None, "")]
+    if missing:
+        warnings.append("Missing lookup fields: " + ", ".join(missing))
+    result["analysis_warnings"] = warnings
     result["_extracted_at"] = utils.now_iso()
     return result
 

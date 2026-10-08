@@ -32,6 +32,7 @@ for _p in [str(_ROOT / "pipeline2"), str(_ROOT / "ai")]:
 import pipeline as p2_pipeline  # pipeline2/pipeline.py
 import fusion as p2_fusion      # pipeline2/fusion.py
 from decision_policy import constrain_score, decide
+import utils as p2_utils
 
 # Pipeline 1 (package imports — ai/ must be on sys.path)
 try:
@@ -226,7 +227,7 @@ def _run_pipeline1(file_path: str) -> dict[str, Any]:
                 try:
                     pts = sr_dict.get("bbox_pts")
                     page_no = int(sr_dict.get("page_number", 0))
-                    page_key = page_no + 1 if page_no == 0 else page_no
+                    page_key = page_no + 1
                     if not pts:
                         # revision edits without a precise box: use full-page band
                         continue
@@ -267,7 +268,7 @@ def _run_pipeline1(file_path: str) -> dict[str, Any]:
                     for reg in pg.get("regions", []):
                         suspect_regions.append(
                             {
-                                "page": pg["page_number"],
+                                "page": max(1, pg["page_number"]),
                                 "bbox_pct": reg["bbox_pct"],
                                 "confidence": reg["confidence"],
                                 "signals": reg["signals"],
@@ -389,7 +390,7 @@ def _extract_revision_evidence(forensics_report: dict) -> dict[str, Any] | None:
                     "current_value": c.get("current_value"),
                     "kind": c.get("kind"),
                     "weight": c.get("weight"),
-                    "page_number": c.get("page_number", 0),
+                    "page_number": c.get("page_number", 0) + 1,
                     "bbox": c.get("bbox"),
                 }
                 for c in changes
@@ -460,9 +461,11 @@ def _holistic_to_api(
         "decision": decision,
         "reasons": reasons,
         "heatmap_url": heatmap_url,
-        "field_verification": field_ver.dict(),
+        "field_verification": field_ver.model_dump(),
         "extracted_fields": extracted,
     }
+    from evidence import document_evidence
+    api.update(document_evidence(verification_report, forensics_report or {}, holistic))
     # Additive only — the frozen single-doc VerifyResponse ignores unknown keys;
     # the batch job spreads `api` into its per-document result, so this surfaces
     # the before/after panel + viewer overlay boxes there without touching the
@@ -486,7 +489,7 @@ def _holistic_to_api(
     return api
 
 
-def process_document(file_bytes: bytes, document_type: str) -> dict[str, Any]:
+def process_document(file_bytes: bytes, document_type: str, on_stage=None) -> dict[str, Any]:
     """Run both pipelines + per-document fusion for ONE document.
 
     Returns the raw pipeline reports (needed for cross-document analysis) plus
@@ -497,20 +500,35 @@ def process_document(file_bytes: bytes, document_type: str) -> dict[str, Any]:
     persist them to /artifacts and set heatmap_url; they never enter the fusion
     input or the stored job JSON.
     """
-    suffix = ".pdf" if file_bytes[:4] == b"%PDF" else ".jpg"
+    suffix = p2_utils.inspect_input(file_bytes)
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(file_bytes)
         tmp_path = tmp.name
 
     try:
+        if on_stage:
+            on_stage("forensics")
         forensics_report = _run_pipeline1(tmp_path)
         # Binary PNGs must not reach the LLM fusion prompt or the SQLite payload.
         heatmap_pages = forensics_report.pop("_heatmap_pages", []) or []
         p2_doc_type = _DOC_TYPE_MAP.get(document_type)
-        verification_report = p2_pipeline.verify_document_file(
-            tmp_path, doc_type=p2_doc_type
-        )
+        try:
+            verification_report = p2_pipeline.verify_document_file(
+                tmp_path, doc_type=p2_doc_type, on_stage=on_stage
+            )
+        except Exception:
+            verification_report = {"document": {"doc_type": p2_doc_type or "unknown"},
+                "extraction": {"fields": {}}, "database": {"found": False},
+                "verification": {"match_status": "unverified", "field_results": [], "deterministic_checks": []},
+                "analysis_warnings": ["Content extraction or verification could not complete; forensic evidence is retained."]}
+        if on_stage:
+            on_stage("fusion")
         holistic = p2_fusion.fuse_reports(verification_report, forensics_report)
+        try:
+            from artifacts import render_preview_pages
+            preview_pages = render_preview_pages(tmp_path)
+        except Exception:
+            preview_pages = []
     finally:
         try:
             os.unlink(tmp_path)
@@ -525,6 +543,7 @@ def process_document(file_bytes: bytes, document_type: str) -> dict[str, Any]:
         "holistic": holistic,
         "revision_evidence": revision_evidence,
         "heatmap_pages": heatmap_pages,
+        "preview_pages": preview_pages,
         "api": _holistic_to_api(
             holistic, verification_report, document_type, revision_evidence,
             forensics_report=forensics_report,
@@ -538,9 +557,10 @@ def process_document(file_bytes: bytes, document_type: str) -> dict[str, Any]:
 @router.post("", response_model=VerifyResponse)
 def verify(req: VerifyRequest) -> VerifyResponse:
     try:
-        file_bytes = base64.b64decode(req.file_base64)
+        file_bytes = base64.b64decode(req.file_base64, validate=True)
+        p2_utils.inspect_input(file_bytes)
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid base64 in file_base64")
+        raise HTTPException(status_code=400, detail="Invalid file. Supply a PDF of 1–8 pages, JPG or PNG, up to 25 MB.")
 
     try:
         out = process_document(file_bytes, req.document_type)

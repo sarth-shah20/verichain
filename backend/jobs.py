@@ -42,6 +42,8 @@ def create(applicant_id: str, document_count: int) -> str:
             "overall": None,
             "underwriter_decision": None,
             "error": None,
+            "document_stages": [],
+            "analysis_warnings": [],
         }
     return job_id
 
@@ -67,3 +69,13 @@ def all_jobs() -> list[dict[str, Any]]:
         jobs = [dict(j) for j in _JOBS.values()]
     jobs.sort(key=lambda j: j.get("submitted_at", ""), reverse=True)
     return jobs
+
+
+def set_stage(job_id: str, index: int, stage: str) -> None:
+    with _LOCK:
+        job = _JOBS.get(job_id)
+        if job is None:
+            return
+        stages = job.setdefault("document_stages", [])
+        if index < len(stages):
+            stages[index] = {**stages[index], "stage": stage}

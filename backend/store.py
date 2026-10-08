@@ -89,6 +89,11 @@ def save(job: dict[str, Any]) -> None:
         "cross_document": job.get("cross_document", []),
         "overall": overall,
         "underwriter_decision": job.get("underwriter_decision"),
+        "analysis_warnings": job.get("analysis_warnings", []),
+        "analysis_status": job.get("analysis_status", "complete"),
+        "document_stages": job.get("document_stages", []),
+        "reconciliation": job.get("reconciliation", []),
+        "demo_scenario": job.get("demo_scenario"),
     }
     try:
         with _conn() as conn:
@@ -122,7 +127,7 @@ def get(job_id: str) -> dict[str, Any] | None:
     try:
         with _conn() as conn:
             row = conn.execute(
-                "SELECT result_json, underwriter_decision FROM verifications "
+                "SELECT result_json, underwriter_decision, note FROM verifications "
                 "WHERE job_id = ? AND deleted = 0",
                 (job_id,),
             ).fetchone()
@@ -145,6 +150,12 @@ def get(job_id: str) -> dict[str, Any] | None:
         "cross_document": payload.get("cross_document", []),
         "overall": payload.get("overall"),
         "underwriter_decision": row["underwriter_decision"],
+        "reviewer_note": row["note"],
+        "analysis_warnings": payload.get("analysis_warnings", []),
+        "analysis_status": payload.get("analysis_status", "legacy"),
+        "document_stages": payload.get("document_stages", []),
+        "reconciliation": payload.get("reconciliation", []),
+        "demo_scenario": payload.get("demo_scenario"),
         "error": None,
     }
 
@@ -168,6 +179,8 @@ def record_decision(job_id: str, decision: str, note: str | None = None) -> dict
 
     Returns {tx_hash, timestamp} on success, or None if the job isn't persisted.
     """
+    if not note or not note.strip():
+        raise ValueError("A reviewer note is required.")
     try:
         with _conn() as conn:
             row = conn.execute(

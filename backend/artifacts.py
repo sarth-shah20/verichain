@@ -41,6 +41,33 @@ def artifacts_dir() -> str:
     return str(_ARTIFACTS_DIR)
 
 
+def render_preview_pages(path: str) -> list[dict]:
+    """Persistable originals share a coordinate space with their page overlays."""
+    import fitz
+    from PIL import Image
+    import io
+    pages = []
+    if path.lower().endswith(".pdf"):
+        with fitz.open(path) as doc:
+            for index, page in enumerate(doc):
+                pix = page.get_pixmap(dpi=120, alpha=False)
+                pages.append({"page_number": index + 1, "png_bytes": pix.tobytes("png")})
+    else:
+        with Image.open(path) as image:
+            image = image.convert("RGB")
+            image.thumbnail((1400, 1800))
+            output = io.BytesIO()
+            image.save(output, format="PNG")
+            pages.append({"page_number": 1, "png_bytes": output.getvalue()})
+    return pages
+
+
+def save_preview(job_id: str, doc_index: int, page_number: int, data: bytes) -> str:
+    filename = f"doc_{doc_index}_original_p{page_number}.png"
+    (ensure_dir(job_id) / filename).write_bytes(data)
+    return f"/artifacts/{job_id}/{filename}"
+
+
 def prune(job_id: str) -> None:
     """Best-effort cleanup of one job's artifacts (never raises)."""
     try:

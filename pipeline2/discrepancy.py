@@ -38,9 +38,10 @@ Rules:
 - INCOME MUST BE NORMALIZED BEFORE COMPARISON. A salary slip states MONTHLY
   amounts while an ITR states ANNUAL amounts — never compare them raw.
   Annualize the slip (x12) or monthly-ize the ITR, then compare. A >15% gap
-  between annualized payslip income and the ITR gross income is a HIGH severity
-  discrepancy (income understatement on loan files is a classic fraud signal) —
-  even when one document's individual verdict is "unverified".
+  between annualized payslip income and the ITR gross income needs review.
+  Monthly x12 is an estimate, not proof of income understatement: employment
+  periods, pay changes and tax years can differ. Rate this MEDIUM unless an
+  independent reference-record discrepancy or material edit corroborates it.
 - employer_name, address, etc.: missing vs present is not a conflict; two
   different present values are.
 - Do not report the same attribute twice under different casings/spellings.

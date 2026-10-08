@@ -96,6 +96,7 @@ SCHEMAS: dict[str, dict[str, Any]] = {
         "key_fields": ["employee_id", "pay_period"],
         "fields": {
             "employee_name": "employee name",
+            "pan": "employee PAN if printed; null if absent",
             "employee_id": "employee id / code",
             "employer_name": "employer name",
             "pay_period": "month/year of the slip",
@@ -153,6 +154,7 @@ SCHEMAS: dict[str, dict[str, Any]] = {
         "key_fields": ["account_last4", "statement_period"],
         "fields": {
             "account_holder": "account holder name",
+            "pan": "account holder PAN if printed; null if absent",
             "account_last4": "account number last 4 digits",
             "bank_name": "bank name",
             "statement_period": "statement period",

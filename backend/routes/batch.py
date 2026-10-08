@@ -34,6 +34,7 @@ import store
 # Importing verify first runs its sys.path surgery (adds pipeline2/ + ai/),
 # so the flat pipeline2 imports below resolve.
 from routes.verify import process_document, _decide, _log_blockchain
+import utils as p2_utils
 
 import discrepancy as p2_discrepancy  # pipeline2/discrepancy.py
 from decision_policy import constrain_score
@@ -179,17 +180,18 @@ def _overall_from_documents(
 
 # ─── Background processing ─────────────────────────────────────────────────────
 
-def _process_one(doc: BatchDocument) -> dict[str, Any]:
+def _process_one(doc: BatchDocument, on_stage=None) -> dict[str, Any]:
     """Verify a single document; never raises (errors become a soft verdict)."""
     try:
-        file_bytes = base64.b64decode(doc.file_base64)
-        out = process_document(file_bytes, doc.document_type)
+        file_bytes = base64.b64decode(doc.file_base64, validate=True)
+        out = process_document(file_bytes, doc.document_type, on_stage=on_stage)
         api = out["api"]
         return {
             "ok": True,
             "verification_report": out["verification_report"],
             "doc_hash": out["doc_hash"],
             "heatmap_pages": out.get("heatmap_pages") or [],
+            "preview_pages": out.get("preview_pages") or [],
             "doc": {
                 "filename": doc.filename or "document",
                 "document_type": doc.document_type,
@@ -216,6 +218,8 @@ def _process_one(doc: BatchDocument) -> dict[str, Any]:
                 },
                 "extracted_fields": {},
                 "analysis_warnings": ["Document processing could not complete."],
+                "analysis_status": "partial",
+                "content_status": "unverified",
             },
         }
 
@@ -227,10 +231,13 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
 
         # 1. Per-document pipelines, concurrently.
         with ThreadPoolExecutor(max_workers=min(4, max(1, total))) as ex:
-            futures = {ex.submit(_process_one, d): i for i, d in enumerate(documents)}
+            futures = {ex.submit(_process_one, d, lambda stage, index=i: jobs.set_stage(job_id, index, stage)): i
+                       for i, d in enumerate(documents)}
             done = 0
             for fut in as_completed(futures):
                 results[futures[fut]] = fut.result()
+                value = results[futures[fut]]
+                jobs.set_stage(job_id, futures[fut], "partial" if value["doc"].get("analysis_warnings") else "completed")
                 done += 1
                 jobs.update(job_id, progress=int(done / total * 80))
 
@@ -241,6 +248,11 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
             import artifacts as _artifacts
 
             for idx, r in enumerate(ordered):
+                original_pages = []
+                for pg in r.get("preview_pages") or []:
+                    url = _artifacts.save_preview(job_id, idx, pg["page_number"], pg["png_bytes"])
+                    original_pages.append({"page_number": pg["page_number"], "url": url})
+                r["doc"]["page_assets"] = original_pages
                 pages = r.get("heatmap_pages") or []
                 if not pages:
                     continue
@@ -248,9 +260,9 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
                 for pg in pages[:3]:
                     try:
                         url = _artifacts.save_heatmap(
-                            job_id, idx, pg["page_number"], pg["png_bytes"]
+                            job_id, idx, max(1, pg["page_number"]), pg["png_bytes"]
                         )
-                        saved.append({"page_number": pg["page_number"], "url": url})
+                        saved.append({"page_number": max(1, pg["page_number"]), "url": url})
                     except Exception:
                         continue
                 if saved:
@@ -259,6 +271,10 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
         except Exception:
             pass
         documents_out = [r["doc"] for r in ordered]
+        for index, doc in enumerate(documents_out):
+            doc["doc_id"] = f"doc_{index}"
+            for item in doc.get("findings", []):
+                item["document_ids"] = [doc["doc_id"]]
 
         # Blockchain audit log per document.
         for r in ordered:
@@ -285,7 +301,8 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
         #    the hero verdict can never contradict the document cards.
         jobs.update(job_id, progress=94)
         overall = _overall_from_documents(documents_out, cross_signals)
-        warnings = (cross_report or {}).get("analysis_warnings", [])
+        warnings = list((cross_report or {}).get("analysis_warnings", []))
+        warnings += [f"{d['filename']}: {w}" for d in documents_out for w in d.get("analysis_warnings", [])]
         if warnings and overall["risk_score"] >= 80:
             overall["risk_score"] = 79
             overall["route_taken"], overall["decision"] = _decide(79)
@@ -300,6 +317,7 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
             cross_document=cross_signals,
             overall=overall,
             analysis_warnings=warnings,
+            analysis_status="partial" if warnings else "complete",
         )
         # Persist the completed verification so it survives restart, can be
         # reopened by job_id, and shows up in the History page.
@@ -316,12 +334,19 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
 def create_batch(req: BatchVerifyRequest) -> BatchJobResponse:
     if not req.documents:
         raise HTTPException(status_code=400, detail="No documents supplied.")
+    for doc in req.documents:
+        try:
+            p2_utils.inspect_input(base64.b64decode(doc.file_base64, validate=True))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"{doc.filename or 'Document'}: {exc}") from exc
 
     applicant_id = (req.applicant_id or "").strip()
     if not applicant_id:
         applicant_id = f"APP-{uuid.uuid4().hex[:6].upper()}"
 
     job_id = jobs.create(applicant_id, len(req.documents))
+    jobs.update(job_id, document_stages=[{"filename": d.filename or "document", "stage": "queued"}
+                                        for d in req.documents])
     Thread(
         target=_process_batch,
         args=(job_id, applicant_id, req.documents),
@@ -453,9 +478,11 @@ def record_decision(job_id: str, req: DecisionRequest) -> dict[str, Any]:
     """Record the underwriter's final decision (persisted + written to audit log)."""
     if req.decision not in _VALID_DECISIONS:
         raise HTTPException(status_code=400, detail="Invalid decision.")
+    if not req.note or not req.note.strip():
+        raise HTTPException(status_code=400, detail="A reviewer note is required.")
     result = store.record_decision(job_id, req.decision, req.note)
     if result is None:
         raise HTTPException(status_code=404, detail="Verification not found.")
     # Keep the in-memory job (if still live) in sync so a poll reflects it.
-    jobs.update(job_id, underwriter_decision=req.decision)
+    jobs.update(job_id, underwriter_decision=req.decision, reviewer_note=req.note.strip())
     return {"recorded": True, "job_id": job_id, **result}

@@ -133,10 +133,6 @@ def generate_heatmap_pages(
             continue
         scores = fused_block_scores(grid)
         regions = (regions_by_page or {}).get(page_number, [])
-        # Fallback: page_number 0-index vs 1-index mismatch — Tier 1 uses 0-based
-        # for scans, Tier 2/get_page_images use 1-based for PDFs. Try both keys.
-        if not regions and regions_by_page:
-            regions = regions_by_page.get(page_number - 1, [])
         # Draw only high/medium boxes — lows stay visible as heat tint only,
         # otherwise a busy typed page is unreadable under dozens of boxes.
         boxed = [r for r in regions if r.confidence in ("high", "medium")]
