@@ -26,7 +26,7 @@ export type SignalFamily =
   | "content"
   | "triangulation";
 
-export type FieldStatus = "ok" | "mismatch" | "missing";
+export type FieldStatus = "ok" | "mismatch" | "missing" | "unverified";
 
 export type JobStatus = "processing" | "done" | "error";
 
@@ -47,6 +47,8 @@ export interface Signal {
   severity: Severity;
   reason: string;
   region?: Region | null;
+  id?: string;
+  page?: number;
 }
 
 export interface ExtractedField {
@@ -56,8 +58,7 @@ export interface ExtractedField {
 }
 
 export interface Pipeline1Report {
-  /** Authenticity & forensics, normalised 0–100. */
-  score: number;
+  status?: string;
   heatmap_url: string | null;
   /** Per-page heatmaps (present when multipage rendering was possible). */
   heatmap_pages?: { page_number: number; url: string | null }[];
@@ -65,8 +66,7 @@ export interface Pipeline1Report {
 }
 
 export interface Pipeline2Report {
-  /** Content extraction & validation, normalised 0–100. */
-  score: number;
+  status?: string;
   extracted_fields: ExtractedField[];
   signals: Signal[];
 }
@@ -103,13 +103,69 @@ export interface DocumentResult {
   pipeline2: Pipeline2Report;
   /** Before/after PDF-revision recovery, when an edited PDF was detected. */
   revision_evidence?: RevisionEvidence | null;
+  page_assets: { page_number: number; url: string }[];
+  findings: Finding[];
+  raw_fields: Record<string, unknown>;
+  analysis_status: string;
+  analysis_warnings: string[];
+  deterministic_checks: DeterministicCheck[];
+}
+
+export interface Finding {
+  id: string;
+  source: string;
+  check_code: string;
+  label: string;
+  detail: string;
+  severity: Severity;
+  document_ids: string[];
+  state?: string;
+  observed?: unknown;
+  expected?: unknown;
+  page?: number;
+  region?: Region;
+  advisory?: boolean;
+  transaction_id?: string;
+}
+
+export interface DeterministicCheck {
+  check: string;
+  passed: boolean | null;
+  detail: string;
+}
+
+export interface BankTransaction {
+  transaction_id: string;
+  date: string | null;
+  description: string;
+  debit: string | null;
+  credit: string | null;
+  balance: string | null;
+  page: number;
+  row: number;
+  valid: boolean;
+}
+
+export interface Reconciliation {
+  id: string;
+  label: string;
+  detail: string;
+  status: string;
+  severity: Severity;
+  document_ids: string[];
+  expected: string | null;
+  observed: string | null;
+  difference: string | null;
+  page?: number;
+  bank_document_id?: string;
+  transaction_id?: string;
+  date?: string;
 }
 
 export interface OverallResult {
   /** Trust / authenticity score, 0–100. HIGHER = more genuine. */
   trust_score: number;
   verdict: Verdict;
-  confidence: number; // 0–1
   summary: string;
 }
 
@@ -128,6 +184,11 @@ export interface VerificationResult {
   flag_history_notes: string[];
   /** The underwriter's recorded decision, if one has been made. */
   underwriter_decision?: UnderwriterDecision | null;
+  reviewer_note?: string | null;
+  analysis_status: string;
+  analysis_warnings: string[];
+  reconciliation: Reconciliation[];
+  demo_scenario?: { id: string; title: string; expected: string[] } | null;
 }
 
 export interface JobStatusResponse {
@@ -135,6 +196,8 @@ export interface JobStatusResponse {
   status: JobStatus;
   progress: number; // 0–100
   result: VerificationResult | null;
+  document_stages?: { filename: string; stage: string }[];
+  error?: string | null;
 }
 
 export interface SubmitResponse {

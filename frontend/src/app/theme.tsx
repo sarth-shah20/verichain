@@ -16,10 +16,10 @@ interface ThemeContextValue {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function getInitialTheme(): Theme {
-  if (typeof window === "undefined") return "dark";
+  if (typeof window === "undefined") return "light";
   const stored = window.localStorage.getItem("vc-theme");
   if (stored === "light" || stored === "dark") return stored;
-  return "dark"; // dark-first forensic console
+  return "light";
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {

@@ -1,179 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { Plus, ArrowUpRight, Search, RefreshCw, ArrowDownWideNarrow, ShieldCheck, Clock3, FileWarning, Files, Download } from "lucide-react";
 import { api } from "@/api";
 import type { HistoryItem, Verdict } from "@/api/types";
 import { VerdictPill } from "@/components/VerdictPill";
 import { EmptyState, ErrorState } from "@/components/States";
 import { Skeleton } from "@/components/Skeleton";
 import { colorForScore } from "@/lib/risk";
-import { cx, formatDateTime } from "@/lib/format";
-import { ListFilter, ArrowUpDown, ShieldAlert, Clock, CheckCircle2 } from "lucide-react";
-
-const FILTERS: Array<{ key: "all" | Verdict | "pending"; label: string }> = [
-  { key: "all", label: "All" },
-  { key: "pending", label: "Pending decision" },
-  { key: "high_risk", label: "High risk" },
-  { key: "review", label: "Needs review" },
-  { key: "genuine", label: "Clean" },
-];
-
+import { formatDateTime } from "@/lib/format";
 export function Queue() {
   const navigate = useNavigate();
-  const [items, setItems] = useState<HistoryItem[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]["key"]>("all");
-  const [sortAsc, setSortAsc] = useState(true); // worst trust first
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [refreshedAt, setRefreshedAt] = useState<string>("");
-
-  useEffect(() => {
-    let cancelled = false;
-    setItems(null); setError(null);
-    api.getHistory()
-      .then((d) => { if (!cancelled) { setItems(d); setRefreshedAt(new Date().toLocaleTimeString()); } })
-      .catch((e) => !cancelled && setError(String(e)));
-    return () => { cancelled = true; };
-  }, [tick]);
-
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 20000);
-    return () => clearInterval(id);
-  }, []);
-
-  const rows = useMemo(() => {
-    let r = items ?? [];
-    if (filter === "pending") r = r.filter((x) => !x.underwriter_decision);
-    else if (filter !== "all") r = r.filter((x) => x.verdict === filter);
-    r = [...r].sort((a, b) => sortAsc ? a.trust_score - b.trust_score : b.trust_score - a.trust_score);
-    return r;
-  }, [items, filter, sortAsc]);
-
-  const stats = useMemo(() => {
-    const it = items ?? [];
-    return {
-      total: it.length,
-      pending: it.filter((x) => !x.underwriter_decision).length,
-      high: it.filter((x) => x.verdict === "high_risk").length,
-      clean: it.filter((x) => x.verdict === "genuine").length,
-    };
-  }, [items]);
-
-  return (
-    <div className="space-y-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Verification queue</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Review the worst-risk files first.</p>
-        </div>
-        <div className="flex items-center gap-3">
-          {refreshedAt && <span className="text-[11px] text-slate-500">Updated {refreshedAt} · auto-refresh 20s</span>}
-          <button onClick={() => setTick((t) => t + 1)} className="btn-secondary">Refresh</button>
-        </div>
-        <button
-          className="btn-secondary"
-          onClick={() => {
-            const header = "application_id,docs,submitted_at,trust_score,verdict,decision\n";
-            const body = rows
-              .map((r) => `${r.application_id},${(r.doc_names ?? "").replace(/,/g, ";")},${r.submitted_at},${r.trust_score},${r.verdict},${r.underwriter_decision ?? ""}`)
-              .join("\n");
-            const url = URL.createObjectURL(new Blob([header + body], { type: "text/csv" }));
-            const a = document.createElement("a");
-            a.href = url; a.download = "verichain-queue.csv"; a.click();
-            URL.revokeObjectURL(url);
-          }}
-        >
-          Export CSV
-        </button>
-      </header>
-
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Total" value={stats.total} icon={<Clock className="h-4 w-4" />} />
-        <Stat label="Pending" value={stats.pending} icon={<ListFilter className="h-4 w-4" />} />
-        <Stat label="High risk" value={stats.high} icon={<ShieldAlert className="h-4 w-4" />} />
-        <Stat label="Clean" value={stats.clean} icon={<CheckCircle2 className="h-4 w-4" />} />
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        {FILTERS.map((f) => (
-          <button key={f.key} onClick={() => setFilter(f.key)}
-            className={cx("rounded-full px-3 py-1 text-xs font-semibold",
-              filter === f.key ? "bg-pipeline1 text-white" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300")}>
-            {f.label}
-          </button>
-        ))}
-        <button onClick={() => setSortAsc((s) => !s)} className="btn-ghost px-2 py-1 text-xs" title="Toggle sort">
-          <ArrowUpDown className="h-3.5 w-3.5" /> {sortAsc ? "Worst first" : "Best first"}
-        </button>
-      </div>
-
-      {selectedIds.size > 0 && (
-        <div className="card flex flex-wrap items-center gap-3 p-3">
-          <span className="text-xs font-semibold text-slate-300">{selectedIds.size} selected</span>
-          <button
-            className="btn-secondary"
-            onClick={async () => {
-              await Promise.allSettled([...selectedIds].map((id) => api.recordDecision(id, "review")));
-              setSelectedIds(new Set()); setTick((t) => t + 1);
-            }}
-          >
-            Mark review
-          </button>
-          <button
-            className="btn-secondary"
-            onClick={async () => {
-              await Promise.allSettled([...selectedIds].map((id) => api.recordDecision(id, "rejected")));
-              setSelectedIds(new Set()); setTick((t) => t + 1);
-            }}
-          >
-            Mark rejected
-          </button>
-          <button className="btn-ghost" onClick={() => setSelectedIds(new Set())}>Clear</button>
-        </div>
-      )}
-
-      {error ? (
-        <ErrorState description={error} onRetry={() => setTick((t) => t + 1)} />
-      ) : items === null ? (
-        <div className="card space-y-2 p-4">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
-      ) : rows.length === 0 ? (
-        <EmptyState title="Queue empty" description="No verifications match this filter." />
-      ) : (
-        <div className="card overflow-hidden divide-y divide-slate-800">
-          {rows.map((r) => (
-            <div key={r.job_id} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-800/40">
-              <input
-                type="checkbox"
-                checked={selectedIds.has(r.job_id)}
-                onChange={(e) => setSelectedIds((prev) => { const n = new Set(prev); e.target.checked ? n.add(r.job_id) : n.delete(r.job_id); return n; })}
-                aria-label={`Select ${r.application_id}`}
-              />
-              <button onClick={() => navigate(`/results/${r.job_id}`)}
-                className="flex w-full items-center gap-4 text-left">
-                <span className="tnum inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white" style={{ backgroundColor: colorForScore(r.trust_score) }}>{r.trust_score}</span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold text-slate-100">{r.application_id}</p>
-                  <p className="truncate text-xs text-slate-400">{r.doc_names ?? "—"} · {formatDateTime(r.submitted_at)}</p>
-                </div>
-                <VerdictPill verdict={r.verdict} size="sm" />
-                {!r.underwriter_decision && <span className="rounded bg-amber-950 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-300">pending</span>}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Stat({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
-  return (
-    <div className="card flex items-center gap-3 p-3">
-      <span className="text-teal-400">{icon}</span>
-      <div>
-        <p className="tnum text-lg font-bold leading-none text-slate-100">{value}</p>
-        <p className="text-[11px] uppercase tracking-wide text-slate-500">{label}</p>
-      </div>
-    </div>
-  );
+  const [items, setItems] = useState<HistoryItem[] | null>(null); const [error, setError] = useState<string | null>(null);
+  const [tick, setTick] = useState(0); const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"all" | "pending" | Verdict>("all"); const [worstFirst, setWorstFirst] = useState(true);
+  useEffect(() => { let cancelled = false; api.getHistory().then(r => { if (!cancelled) { setItems(r); setError(null); } }).catch(e => !cancelled && setError(String(e))); return () => { cancelled = true; }; }, [tick]);
+  useEffect(() => { const timer = setInterval(() => setTick(t => t + 1), 20000); return () => clearInterval(timer); }, []);
+  const rows = useMemo(() => (items ?? []).filter(r => (!query || `${r.application_id} ${r.doc_names}`.toLowerCase().includes(query.toLowerCase())) && (filter === "all" || (filter === "pending" ? !r.underwriter_decision : r.verdict === filter))).sort((a, b) => worstFirst ? a.trust_score - b.trust_score : b.trust_score - a.trust_score), [items, query, filter, worstFirst]);
+  const stats = [{ label: "Applications checked", value: items?.length, icon: Files, tone: "text-slate-500" }, { label: "Awaiting your decision", value: items?.filter(r => !r.underwriter_decision).length, icon: Clock3, tone: "text-amber-600" }, { label: "High-risk applications", value: items?.filter(r => r.verdict === "high_risk").length, icon: FileWarning, tone: "text-red-600" }, { label: "Consistent applications", value: items?.filter(r => r.verdict === "genuine").length, icon: ShieldCheck, tone: "text-teal-700" }];
+  const exportRows = () => { const quote = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`; const data = ["Application,Documents,Submitted,Authenticity,Recommendation,Decision", ...rows.map(r => [r.application_id, r.doc_names, r.submitted_at, r.trust_score, r.verdict, r.underwriter_decision].map(quote).join(","))].join("\n"); const url = URL.createObjectURL(new Blob([data], { type: "text/csv" })); const a = document.createElement("a"); a.href = url; a.download = "verichain-applications.csv"; a.click(); URL.revokeObjectURL(url); };
+  return <div className="space-y-7">
+    <header className="flex flex-wrap items-end justify-between gap-5"><div><p className="eyebrow">CLEAR EVIDENCE. INFORMED LENDING.</p><h1 className="page-title">Know what you're approving.</h1><p className="page-description">Your applicants, their documents, and the evidence that matters.</p></div><Link className="btn-primary" to="/new"><Plus size={17} /> New verification</Link></header>
+    <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">{stats.map(s => <div className="stat-card" key={s.label}><div className="flex items-center justify-between"><span className="text-xs font-medium text-slate-500 dark:text-slate-400">{s.label}</span><s.icon size={18} className={s.tone} /></div><div className="stat-value tnum">{s.value ?? "—"}</div><p className="mt-2 text-[11px] text-slate-400">From your saved verifications</p></div>)}</div>
+    <section className="card overflow-hidden"><div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 p-5 dark:border-slate-700"><div><h2 className="font-semibold">Application queue</h2><p className="mt-1 text-xs text-slate-500">Start with the files that need a closer look.</p></div><div className="flex gap-2"><button className="btn-ghost px-3 py-2 text-xs" onClick={exportRows}><Download size={14} /> Export</button><button className="btn-secondary px-3 py-2 text-xs" onClick={() => setTick(t => t + 1)}><RefreshCw size={14} /> Refresh</button></div></div>
+    <div className="flex flex-wrap items-center gap-3 p-5"><label className="relative min-w-[180px] flex-1"><Search size={16} className="absolute left-3 top-3 text-slate-400" /><input aria-label="Search applications" className="input pl-9" placeholder="Search application or document…" value={query} onChange={e => setQuery(e.target.value)} /></label><select className="input w-auto" aria-label="Filter applications" value={filter} onChange={e => setFilter(e.target.value as typeof filter)}><option value="all">All applications</option><option value="pending">Awaiting decision</option><option value="high_risk">High risk</option><option value="review">Needs review</option><option value="genuine">Consistent</option></select><button className="btn-secondary" onClick={() => setWorstFirst(v => !v)}><ArrowDownWideNarrow size={15} />{worstFirst ? "Risk first" : "Best first"}</button></div>
+    {error ? <div className="p-5"><ErrorState description={error} onRetry={() => setTick(t => t + 1)} /></div> : !items ? <div className="space-y-3 p-5">{[1, 2, 3].map(i => <Skeleton key={i} className="h-16" />)}</div> : !rows.length ? <div className="p-8"><EmptyState title="A clear place to start" description="Upload an applicant's documents or choose a synthetic demo to begin." action={<Link className="btn-primary" to="/new">Check documents <ArrowUpRight size={15} /></Link>} /></div> : <div className="overflow-x-auto"><table className="w-full min-w-[620px] text-left text-sm"><thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400 dark:bg-slate-800/50"><tr><th className="px-5 py-3">Application / documents</th><th className="px-4 py-3">Submitted</th><th className="px-4 py-3">Authenticity</th><th className="px-4 py-3">Recommendation</th><th className="px-4 py-3">Your decision</th><th /></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-700">{rows.map(row => <tr key={row.job_id} tabIndex={0} onKeyDown={e => e.key === "Enter" && navigate(`/results/${row.job_id}`)} onClick={() => navigate(`/results/${row.job_id}`)} className="cursor-pointer transition-colors hover:bg-teal-50/40 dark:hover:bg-slate-800"><td className="px-5 py-5"><strong className="font-semibold">{row.application_id}</strong><span className="mt-1 block max-w-[250px] truncate text-xs text-slate-400">{row.doc_names || `${row.document_count} documents`}</span></td><td className="px-4 text-xs text-slate-500">{formatDateTime(row.submitted_at)}</td><td className="px-4"><strong className="tnum font-semibold">{row.trust_score}<span className="text-[10px] font-normal text-slate-400"> /100</span></strong><div className="score-meter mt-2 w-20"><span style={{ width: `${row.trust_score}%`, background: colorForScore(row.trust_score) }} /></div></td><td className="px-4"><VerdictPill verdict={row.verdict} size="sm" /></td><td className="px-4 text-xs"><span className={row.underwriter_decision ? "text-slate-500" : "text-amber-700 dark:text-amber-400"}>{row.underwriter_decision ? ({ approved: "Approved", review: "Manual review", rejected: "Rejected" }[row.underwriter_decision]) : "Awaiting decision"}</span></td><td className="px-4 text-slate-400"><ArrowUpRight size={16} /></td></tr>)}</tbody></table></div>}
+    <div className="flex justify-between border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400 dark:border-slate-700"><span>{rows.length} application{rows.length === 1 ? "" : "s"}</span><span>Updates every 20 seconds</span></div></section>
+    <div className="flex flex-wrap justify-between gap-3 text-[11px] text-slate-400"><span>Land records · Income tax returns · Salary slips · Bank statements</span><span>System recommendations. Human decisions.</span></div>
+  </div>;
 }

@@ -1,191 +1,22 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { X, Loader2, ShieldCheck } from "lucide-react";
+import { X, ArrowRight, ShieldCheck, ScanText, GitCompareArrows, FilePlus2 } from "lucide-react";
 import { api } from "@/api";
-import type { DocType, SubmitFile } from "@/api/types";
+import type { DocType } from "@/api/types";
 import { FileDropzone } from "@/components/FileDropzone";
 import { DocTypeIcon } from "@/components/DocTypeIcon";
 import { useToast } from "@/app/toast";
-import { DOC_TYPE_LABELS, docTypeLabel, formatBytes } from "@/lib/format";
-
-interface QueuedFile {
-  id: string;
-  file: File;
-  docType: DocType;
-}
-
-const DOC_TYPE_OPTIONS = Object.keys(DOC_TYPE_LABELS) as DocType[];
-
+import { DOC_TYPE_LABELS, formatBytes } from "@/lib/format";
+interface QueuedFile { id: string; file: File; docType: DocType }
 export function NewVerification() {
-  const navigate = useNavigate();
-  const { toast } = useToast();
-  const [queue, setQueue] = useState<QueuedFile[]>([]);
-  const [applicationId, setApplicationId] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  const addFiles = (files: File[]) => {
-    setQueue((prev) => [
-      ...prev,
-      ...files.map((file) => ({
-        id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 7)}`,
-        file,
-        docType: "unknown" as DocType,
-      })),
-    ]);
-  };
-
-  const removeFile = (id: string) =>
-    setQueue((prev) => prev.filter((q) => q.id !== id));
-
-  const setType = (id: string, docType: DocType) =>
-    setQueue((prev) => prev.map((q) => (q.id === id ? { ...q, docType } : q)));
-
-  const submit = async () => {
-    if (queue.length === 0) return;
-    setSubmitting(true);
-    try {
-      const payload: SubmitFile[] = queue.map((q) => ({
-        file: q.file,
-        doc_type: q.docType,
-      }));
-      const { job_id } = await api.submit({
-        files: payload,
-        application_id: applicationId.trim() || undefined,
-      });
-      navigate(`/processing/${job_id}`);
-    } catch (e) {
-      toast(
-        e instanceof Error ? e.message : "Could not submit documents.",
-        "warning"
-      );
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-          New verification
-        </h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Upload an applicant's documents to check them for tampering, forgery
-          and content mismatches.
-        </p>
-      </header>
-
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="space-y-5 lg:col-span-2">
-          <FileDropzone
-            onFiles={addFiles}
-            onReject={(msg) => toast(msg, "warning")}
-          />
-
-          {queue.length === 0 ? (
-            <p className="text-center text-sm text-slate-400">
-              No documents queued yet.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {queue.map((q) => (
-                <li
-                  key={q.id}
-                  className="card flex flex-wrap items-center gap-3 p-3"
-                >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-800">
-                    <DocTypeIcon type={q.docType} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
-                      {q.file.name}
-                    </p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {formatBytes(q.file.size)} ·{" "}
-                      {q.file.type.split("/")[1]?.toUpperCase() || "FILE"}
-                    </p>
-                  </div>
-                  <label className="sr-only" htmlFor={`type-${q.id}`}>
-                    Document type for {q.file.name}
-                  </label>
-                  <select
-                    id={`type-${q.id}`}
-                    value={q.docType}
-                    onChange={(e) => setType(q.id, e.target.value as DocType)}
-                    className="input w-auto py-1.5 text-xs"
-                  >
-                    {DOC_TYPE_OPTIONS.map((t) => (
-                      <option key={t} value={t}>
-                        {docTypeLabel(t)}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={() => removeFile(q.id)}
-                    className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-risk-high dark:hover:bg-slate-800"
-                    aria-label={`Remove ${q.file.name}`}
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <aside className="space-y-5">
-          <div className="card space-y-4 p-5">
-            <div>
-              <label
-                htmlFor="app-id"
-                className="block text-sm font-semibold text-slate-700 dark:text-slate-200"
-              >
-                Application ID{" "}
-                <span className="font-normal text-slate-400">(optional)</span>
-              </label>
-              <input
-                id="app-id"
-                value={applicationId}
-                onChange={(e) => setApplicationId(e.target.value)}
-                placeholder="e.g. APP-10231"
-                className="input mt-1.5"
-              />
-            </div>
-
-            <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
-              <p className="flex items-center gap-1.5 font-semibold text-slate-600 dark:text-slate-300">
-                <ShieldCheck className="h-4 w-4 text-pipeline1" />
-                Two pipelines run on every file
-              </p>
-              <p className="mt-1.5">
-                <span className="font-medium text-pipeline1">Forensics</span>{" "}
-                checks if the file is physically genuine.{" "}
-                <span className="font-medium text-pipeline2">Verification</span>{" "}
-                reads and cross-validates the data.
-              </p>
-            </div>
-
-            <button
-              onClick={submit}
-              disabled={queue.length === 0 || submitting}
-              className="btn-primary w-full"
-            >
-              {submitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Submitting…
-                </>
-              ) : (
-                <>Verify {queue.length > 0 ? `${queue.length} ` : ""}document
-                {queue.length === 1 ? "" : "s"}</>
-              )}
-            </button>
-            {queue.length === 0 && (
-              <p className="text-center text-xs text-slate-400">
-                Add at least one valid file to continue.
-              </p>
-            )}
-          </div>
-        </aside>
-      </div>
-    </div>
-  );
+  const navigate = useNavigate(); const { toast } = useToast();
+  const [queue, setQueue] = useState<QueuedFile[]>([]); const [applicationId, setApplicationId] = useState(""); const [submitting, setSubmitting] = useState(false);
+  const addFiles = (files: File[]) => setQueue(prev => [...prev, ...files.map(file => ({ id: crypto.randomUUID(), file, docType: "unknown" as DocType }))]);
+  const submit = async () => { setSubmitting(true); try { const { job_id } = await api.submit({ files: queue.map(q => ({ file: q.file, doc_type: q.docType })), application_id: applicationId.trim() || undefined }); navigate(`/processing/${job_id}`); } catch (e) { toast(e instanceof Error ? e.message : "Unable to submit", "warning"); setSubmitting(false); } };
+  return <div className="space-y-7"><header><p className="eyebrow">START WITH THE DOCUMENTS</p><h1 className="page-title">A clearer picture of your applicant.</h1><p className="page-description">Upload a document pack. We check the files, compare their contents, and bring the evidence together.</p></header>
+    <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]"><div className="space-y-5"><section className="card p-6"><div className="mb-5 flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-50 text-teal-700 dark:bg-teal-950"><FilePlus2 size={19} /></span><div><h2 className="font-semibold">Applicant documents</h2><p className="mt-1 text-xs text-slate-500">Add multiple documents for cross-document checks.</p></div></div><FileDropzone onFiles={addFiles} onReject={m => toast(m, "warning")} /><p className="mt-3 text-center text-[11px] text-slate-400">PDFs: up to 8 pages · PDF, JPG or PNG · 25 MB per file</p>
+      {queue.length > 0 && <ul className="mt-6 divide-y divide-slate-100 dark:divide-slate-700">{queue.map(q => <li className="flex flex-wrap items-center gap-3 py-4" key={q.id}><span className="rounded-lg bg-slate-50 p-3 text-slate-500 dark:bg-slate-800"><DocTypeIcon type={q.docType} /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{q.file.name}</p><p className="mt-1 text-xs text-slate-400">{formatBytes(q.file.size)}</p></div><select aria-label={`Document type for ${q.file.name}`} className="input w-auto max-w-[190px] text-xs" value={q.docType} onChange={e => setQueue(prev => prev.map(f => f.id === q.id ? { ...f, docType: e.target.value as DocType } : f))}>{Object.entries(DOC_TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button className="btn-ghost p-2" aria-label={`Remove ${q.file.name}`} onClick={() => setQueue(prev => prev.filter(f => f.id !== q.id))}><X size={16} /></button></li>)}</ul>}
+    </section><section className="card flex flex-wrap items-end gap-4 p-6"><label className="min-w-[180px] flex-1"><span className="mb-2 block text-xs font-semibold">Application ID <span className="font-normal text-slate-400">optional</span></span><input className="input" placeholder="e.g. LOAN-2026-001" value={applicationId} onChange={e => setApplicationId(e.target.value)} /></label><button className="btn-primary" disabled={!queue.length || submitting} onClick={submit}>{submitting ? "Submitting…" : `Verify ${queue.length || ""} document${queue.length === 1 ? "" : "s"}`}<ArrowRight size={16} /></button></section></div>
+    <aside className="space-y-5"><div className="card p-6"><p className="section-label">THREE QUESTIONS, ONE REPORT</p>{[{ icon: ShieldCheck, title: "Was the file altered?", text: "Structure, recovered PDF revisions, and localized image signals." }, { icon: ScanText, title: "Does the content add up?", text: "Reference records, identifier checks, and financial arithmetic." }, { icon: GitCompareArrows, title: "Do the documents agree?", text: "Identity, income, and salary credits checked across the pack." }].map((item, i) => <div key={item.title} className="mt-6 flex items-start gap-3"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs text-slate-500 dark:bg-slate-800">0{i + 1}</span><div><h3 className="text-sm font-semibold">{item.title}</h3><p className="mt-1.5 text-xs leading-relaxed text-slate-500 dark:text-slate-400">{item.text}</p></div></div>)}</div><div className="rounded-2xl border border-teal-100 bg-teal-50/80 p-5 dark:border-teal-900 dark:bg-teal-950/40"><ShieldCheck size={20} className="text-teal-700 dark:text-teal-400" /><h3 className="mt-3 text-sm font-semibold text-teal-900 dark:text-teal-200">You're in control of the decision.</h3><p className="mt-2 text-xs leading-relaxed text-teal-800/70 dark:text-teal-300">A recommendation is backed by inspectable evidence. The final decision and its reason stay with the reviewer.</p></div></aside></div>
+  </div>;
 }

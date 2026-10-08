@@ -24,6 +24,12 @@ const STATUS_META: Record<
     row: "bg-amber-50/60 dark:bg-amber-950/30",
     badge: "text-risk-mid",
   },
+  unverified: {
+    icon: MinusCircle,
+    label: "Unverified",
+    row: "",
+    badge: "text-slate-500",
+  },
 };
 
 export function FieldsTable({ fields }: { fields: ExtractedField[] }) {

@@ -138,16 +138,18 @@ export class RealVeriChainApi implements VeriChainApi {
         job_id: jobId,
         status: "done",
         progress: 100,
+        document_stages: job.document_stages,
         result: buildResultFromBatch(job, this.baseUrl, this.thumbsFor(jobId)),
       };
     }
     if (job.status === "error") {
-      return { job_id: jobId, status: "error", progress: 100, result: null };
+      return { job_id: jobId, status: "error", progress: 100, result: null, error: job.error };
     }
     return {
       job_id: jobId,
       status: "processing",
       progress: job.progress ?? 0,
+      document_stages: job.document_stages,
       result: null,
     };
   }

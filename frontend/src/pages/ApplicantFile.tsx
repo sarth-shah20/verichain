@@ -1,160 +1,31 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
-import { api } from "@/api";
-import { useToast } from "@/app/toast";
+import { useEffect, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import type { BankTransaction } from "@/api/types";
 import { useResult } from "@/lib/useResult";
 import { DocumentViewer } from "@/components/DocumentViewer";
-import { BeforeAfterPanel } from "@/components/BeforeAfterPanel";
-import { EvidenceTimeline } from "@/components/EvidenceTimeline";
-import { SignalCard } from "@/components/SignalCard";
+import { DecisionDrawer } from "@/components/DecisionDrawer";
+import { ReconciliationPanel } from "@/components/ReconciliationPanel";
 import { FieldsTable } from "@/components/FieldsTable";
-import { ScoreGauge } from "@/components/ScoreGauge";
-import { VerdictPill } from "@/components/VerdictPill";
-import { ErrorState, EmptyState } from "@/components/States";
-import { Skeleton } from "@/components/Skeleton";
-import { colorForScore } from "@/lib/risk";
-import { docTypeLabel } from "@/lib/format";
-
+import { ErrorState } from "@/components/States";
 export function ApplicantFile() {
-  const { jobId } = useParams<{ jobId: string }>();
-  const { result, loading, error, reload } = useResult(jobId);
-  const [activeDocId, setActiveDocId] = useState<string | null>(null);
-  const [activeRegionId, setActiveRegionId] = useState<string | null>(null);
-  const viewerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (result?.documents?.length && !activeDocId) setActiveDocId(result.documents[0].doc_id);
-  }, [result, activeDocId]);
-
-  const doc = useMemo(() => result?.documents.find((d) => d.doc_id === activeDocId) ?? result?.documents[0] ?? null, [result, activeDocId]);
-
-  if (loading) return <AppSkeleton />;
-  if (error || !result) return <ErrorState description={error ?? "Not found"} onRetry={reload} />;
-  if (!doc) return <EmptyState title="No document" />;
-
-  return (
-    <div className="space-y-4">
-      <Link to={`/results/${jobId}`} className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-400 hover:text-teal-300">
-        <ArrowLeft className="h-4 w-4" /> Back to results
-      </Link>
-
-      <header className="card flex items-center gap-5 p-5">
-        <ScoreGauge score={result.overall.trust_score} size={84} strokeWidth={8} showVerdict={false} />
-        <div className="flex-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold text-white">{result.application_id}</h1>
-            <VerdictPill verdict={result.overall.verdict} />
-          </div>
-          <p className="mt-1 text-sm text-slate-400">{result.overall.summary}</p>
-        </div>
-        <div className="text-right text-xs text-slate-500">
-          <p className="tnum text-lg font-bold text-slate-200">{result.documents.length}</p>
-          docs
-        </div>
-      </header>
-
-      <div className="grid gap-4 lg:grid-cols-[260px_1fr_360px]">
-        {/* Left: document rail */}
-        <aside className="card divide-y divide-slate-800 p-2">
-          {result.documents.map((d) => (
-            <button key={d.doc_id} onClick={() => setActiveDocId(d.doc_id)}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${activeDocId === d.doc_id ? "bg-slate-800" : "hover:bg-slate-800/50"}`}>
-              <span className="tnum inline-flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ backgroundColor: colorForScore(d.trust_score) }}>{d.trust_score}</span>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-200">{d.filename}</p>
-                <p className="text-[11px] text-slate-500">{docTypeLabel(d.doc_type)}</p>
-              </div>
-            </button>
-          ))}
-        </aside>
-
-        {/* Center: viewer */}
-        <section ref={viewerRef}>
-          <DocumentViewer doc={doc} activeRegionId={activeRegionId} onRegionClick={setActiveRegionId} />
-        </section>
-
-        {/* Right: findings */}
-        <aside className="space-y-4">
-          {doc.revision_evidence?.detected && <BeforeAfterPanel evidence={doc.revision_evidence} />}
-          <div className="card p-4">
-            <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-400">Signals</h3>
-            <div className="space-y-2">
-              {doc.pipeline1.signals.concat(doc.pipeline2.signals).slice(0, 6).map((s, i) => (
-                <SignalCard key={i} signal={s} pipeline={i < doc.pipeline1.signals.length ? 1 : 2} />
-              ))}
-            </div>
-          </div>
-          <EvidenceTimeline
-            doc={doc}
-            onJump={({ where, index }) => {
-              setActiveRegionId(`${where === "Pipeline 1" ? "p1" : "p2"}-${index}`);
-              viewerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }}
-          />
-          <div className="card p-4">
-            <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-400">Fields</h3>
-            <FieldsTable fields={doc.pipeline2.extracted_fields} />
-          </div>
-        </aside>
-      </div>
-
-      {/* Cross-document trust checks */}
-      {result.cross_document.length > 0 && (
-        <section className="card p-4">
-          <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-400">Cross-document trust checks</h3>
-          <div className="space-y-2">
-            {result.cross_document.map((c, i) => (
-              <div key={i} className="flex items-center justify-between rounded-lg bg-slate-800/50 px-3 py-2">
-                <span className="text-sm text-slate-200">{c.label}</span>
-                <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${c.severity === 'high' ? 'bg-red-950 text-red-300' : c.severity === 'medium' ? 'bg-amber-950 text-amber-300' : 'bg-sky-950 text-sky-300'}`}>{c.severity}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Decision bar */}
-      <DecisionBar jobId={jobId!} />
-    </div>
-  );
-}
-
-function DecisionBar({ jobId }: { jobId: string }) {
-  const [note, setNote] = useState("");
-  const [saving, setSaving] = useState(false);
-  const { toast } = useToast();
-  const act = async (d: string, label: string) => {
-    if (!note.trim()) { toast("Add a reason note first.", "warning"); return; }
-    setSaving(true);
-    try {
-      await api.recordDecision(jobId, d as any, note);
-      toast(`${label} recorded.`, "success");
-    } catch (e: any) {
-      toast(e.message ?? "Failed", "warning");
-    } finally { setSaving(false); }
-  };
-  return (
-    <div className="card space-y-3 p-4">
-      <h3 className="text-xs font-bold uppercase tracking-wide text-slate-400">Underwriter decision — note required</h3>
-      <textarea className="input min-h-[70px]" placeholder="Reason for this decision…" value={note} onChange={(e) => setNote(e.target.value)} />
-      <div className="flex gap-2">
-        <button disabled={saving} onClick={() => act("approved", "Approved")} className="btn-primary">Approve</button>
-        <button disabled={saving} onClick={() => act("review", "Manual review")} className="btn-secondary">Manual review</button>
-        <button disabled={saving} onClick={() => act("rejected", "Rejected")} className="btn-secondary">Reject</button>
-      </div>
-    </div>
-  );
-}
-
-function AppSkeleton() {
-  return (
-    <div className="space-y-4">
-      <Skeleton className="h-10 w-48" />
-      <Skeleton className="h-24 w-full" />
-      <div className="grid gap-4 lg:grid-cols-[260px_1fr_360px]">
-        <Skeleton className="h-96 w-full" /><Skeleton className="h-96 w-full" /><Skeleton className="h-96 w-full" />
-      </div>
-    </div>
-  );
+  const { jobId } = useParams(); const [query] = useSearchParams(); const { result, loading, error, reload } = useResult(jobId);
+  const [active, setActive] = useState(query.get("doc") ?? "doc_0"); const [page, setPage] = useState(Number(query.get("page")) || 1); const [findingId, setFindingId] = useState<string | null>(null); const [all, setAll] = useState(false); const [transaction, setTransaction] = useState(query.get("transaction"));
+  useEffect(() => { if (transaction) document.getElementById(transaction)?.scrollIntoView({ block: "nearest" }); }, [transaction, result, active]);
+  if (loading) return <div className="skeleton h-96" />;
+  if (error || !result) return <ErrorState description={error ?? "Report not found."} onRetry={reload} />;
+  const doc = result.documents.find(d => d.doc_id === active) ?? result.documents[0]; if (!doc) return <p>No documents available.</p>;
+  const findings = doc.findings.filter(f => all || (f.state !== "passed" && f.state !== "skipped"));
+  const rows = Array.isArray(doc.raw_fields.transactions) ? doc.raw_fields.transactions as BankTransaction[] : [];
+  return <div className="space-y-5"><Link className="text-sm text-teal-600 font-semibold" to={`/results/${jobId}`}>← Application summary</Link><header className="flex flex-wrap justify-between items-center gap-3"><div><p className="eyebrow">Evidence workspace</p><h1 className="page-title mt-2">{result.application_id}</h1></div><DecisionDrawer jobId={jobId!} result={result} onSaved={reload} /></header>
+  <div className="review-workspace"><aside className="card p-3 self-start"><h2 className="section-label px-2 mb-3">Documents</h2>{result.documents.map(d => <button key={d.doc_id} className={`doc-rail-item ${d.doc_id === doc.doc_id ? "active" : ""}`} onClick={() => { setActive(d.doc_id); setPage(1); setFindingId(null); setTransaction(null); }}><span className="tag">{d.trust_score}/100</span><p className="text-sm font-semibold mt-2 break-words">{d.filename}</p><p className="text-xs mt-1" style={{ color: "var(--muted)" }}>{d.analysis_status}</p></button>)}</aside>
+  <section className="min-w-0 space-y-4"><DocumentViewer key={doc.doc_id} doc={doc} page={page} onPageChange={setPage} activeRegionId={findingId} onRegionClick={id => { setFindingId(id); document.getElementById(`finding-${id}`)?.scrollIntoView({ block: "nearest" }); }} />
+  {!!rows.length && <section className="card p-4"><h2 className="section-label mb-3">Transaction evidence · INR</h2><div className="overflow-auto"><table className="w-full text-xs whitespace-nowrap"><thead><tr>{["Date","Description","Debit","Credit","Balance","Page"].map(h => <th key={h} className="text-left p-2">{h}</th>)}</tr></thead><tbody>{rows.map(r => <tr id={r.transaction_id} key={r.transaction_id} style={{ background: transaction === r.transaction_id ? "var(--accent-soft)" : undefined }}><td className="p-2">{r.date ?? "Unknown"}</td><td className="p-2 max-w-64 whitespace-normal">{r.description}</td>{[r.debit,r.credit,r.balance].map((m,i) => <td className="p-2" key={i}>{m ?? "Unknown"}</td>)}<td className="p-2"><button className="text-teal-600" onClick={() => { setPage(r.page); setTransaction(r.transaction_id); }}>{r.page}</button></td></tr>)}</tbody></table></div></section>}
+  <section className="card p-4"><h2 className="section-label mb-3">Extracted fields</h2><FieldsTable fields={doc.pipeline2.extracted_fields} /></section></section>
+  <aside className="min-w-0 space-y-4"><section className="card p-4"><div className="flex justify-between items-center mb-3"><h2 className="section-label">Findings · {findings.length}</h2><label className="text-xs flex gap-1"><input type="checkbox" checked={all} onChange={e => setAll(e.target.checked)} /> All checks</label></div>
+  {!findings.length && <p className="text-sm" style={{ color: "var(--muted)" }}>{doc.analysis_status === "legacy" ? "Detailed findings are unavailable for this older report." : "No suspicious findings identified."}</p>}
+  {findings.map(f => <button id={`finding-${f.id}`} key={f.id} className={`evidence-item text-left w-full mb-3 ${findingId === f.id ? "border-teal-500" : ""}`} onClick={() => { setFindingId(f.id); if (f.page) setPage(f.page); if (f.transaction_id) setTransaction(f.transaction_id); }}><p className="text-[10px] uppercase tracking-wide" style={{ color: "var(--muted)" }}>{f.source} · {f.state ?? f.severity}</p><h3 className="text-sm font-semibold mt-1">{f.label}</h3><p className="text-xs mt-2 leading-relaxed" style={{ color: "var(--muted)" }}>{f.detail}</p>{f.expected != null && <p className="text-xs mt-2">Expected: {String(f.expected)}</p>}{f.observed != null && <p className="text-xs mt-1">Observed: {String(f.observed)}</p>}{f.page && <p className="text-xs text-teal-600 mt-2">View page {f.page} →</p>}</button>)}
+  {doc.analysis_warnings.map((w,i) => <p key={i} className="text-xs text-amber-700 mt-2">{w}</p>)}</section>
+  {doc.revision_evidence?.detected && <section className="card p-4"><p className="eyebrow">Recovered prior revision</p>{doc.revision_evidence.changes.map((c,i) => <button key={i} className="evidence-item mt-3 w-full text-left" onClick={() => setPage(c.page_number)}><strong className="text-sm">{c.field_hint ?? c.kind}</strong><p className="text-sm mt-2"><del className="text-rose-600">{c.original_value}</del> → <span className="font-semibold">{c.current_value}</span></p><p className="text-xs mt-2">Page {c.page_number} · {c.weight} materiality</p></button>)}</section>}
+  </aside></div><ReconciliationPanel items={result.reconciliation} onJump={i => { if (i.bank_document_id) setActive(i.bank_document_id); setPage(i.page ?? 1); setTransaction(i.transaction_id ?? null); }} />
+  {result.reviewer_note && <section className="card p-5"><p className="eyebrow">Reviewer note · {result.underwriter_decision}</p><p className="mt-2 whitespace-pre-wrap">{result.reviewer_note}</p></section>}</div>;
 }
