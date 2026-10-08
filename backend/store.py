@@ -55,6 +55,11 @@ def init() -> None:
                 )
                 """
             )
+            conn.execute("""CREATE TABLE IF NOT EXISTS blockchain_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, applicant_id TEXT, doc_hash TEXT,
+                risk_score INTEGER, decision TEXT, timestamp TEXT, tx_hash TEXT,
+                event_type TEXT DEFAULT 'system_verdict', note TEXT
+            )""")
             # Migrate the existing blockchain_log: add an event_type discriminator
             # so human decisions can be recorded alongside system verdicts without
             # a rebuild. Existing rows default to 'system_verdict'.

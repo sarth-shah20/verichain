@@ -42,6 +42,11 @@ def document_evidence(verification: dict, forensics: dict, holistic: dict) -> di
     for region in forensics.get("suspect_regions", []):
         if region.get("confidence") == "low":
             continue
+        if "revision_edit" in region.get("signals", []):
+            recovered = next((f for f in findings if f["check_code"] == "revision_edit" and f.get("page") == region.get("page")), None)
+            if recovered:
+                recovered["region"] = region.get("bbox_pct")
+                continue
         findings.append(finding("forensics", "localized_signal", "Localized forensic signal",
             region.get("note", "") or ", ".join(region.get("signals", [])),
             "medium", page=region.get("page", 1), region=region.get("bbox_pct"), advisory=True))
