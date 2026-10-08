@@ -1,8 +1,10 @@
 # VeriChain
 
-Real-time multi-modal document verification for loan underwriting.
+Document tampering and content verification for loan underwriting.
 
-SuRaksha Cyber Hackathon 2.0 — Theme 1: Real-Time Anomaly Detection
+Current focus: **Technical Answers for Real World Problems (TARP)** college project. See the [demo walkthrough and measured results](docs/tarp-walkthrough.md) for setup, implemented fixes, six live synthetic scenarios, and limitations.
+
+Originally developed for SuRaksha Cyber Hackathon 2.0 — Theme 1: Real-Time Anomaly Detection
 
 ---
 
