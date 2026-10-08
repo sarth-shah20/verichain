@@ -113,6 +113,7 @@ export class RealVeriChainApi implements VeriChainApi {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         applicant_id: options.application_id?.trim() || undefined,
+        demo_scenario: options.demo_scenario,
         documents,
       }),
     });

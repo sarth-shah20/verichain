@@ -160,12 +160,14 @@ def fetch_record(
     if not isinstance(extracted_fields, dict):
         extracted_fields = {}
     key = _make_lookup_key(key_fields, extracted_fields)
-    record = _backend_fetch(db_collection, key, extracted_fields)
+    from demo_records import reference
+    demo = reference(db_collection, extracted_fields)
+    record = demo or _backend_fetch(db_collection, key, extracted_fields)
     if record is None:
         return {"found": False, "source": None, "record": {}, "as_of": None}
     return {
         "found": True,
-        "source": db_collection,
+        "source": "synthetic_demo_reference" if demo else db_collection,
         "record": record,
         "as_of": record.get("as_of"),
     }

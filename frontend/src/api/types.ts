@@ -213,6 +213,7 @@ export interface SubmitFile {
 export interface SubmitOptions {
   files: SubmitFile[];
   application_id?: string;
+  demo_scenario?: string;
 }
 
 /** Compact history row (audit trail). */

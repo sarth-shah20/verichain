@@ -58,6 +58,7 @@ class BatchDocument(BaseModel):
 class BatchVerifyRequest(BaseModel):
     applicant_id: str | None = None
     documents: list[BatchDocument]
+    demo_scenario: str | None = None
 
 
 class BatchJobResponse(BaseModel):
@@ -195,7 +196,7 @@ def _process_one(doc: BatchDocument, on_stage=None) -> dict[str, Any]:
             "preview_pages": out.get("preview_pages") or [],
             "doc": {
                 "filename": doc.filename or "document",
-                "document_type": doc.document_type,
+                "document_type": out["verification_report"].get("document", {}).get("doc_type", doc.document_type),
                 **api,
             },
         }
@@ -344,6 +345,10 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
 def create_batch(req: BatchVerifyRequest) -> BatchJobResponse:
     if not req.documents:
         raise HTTPException(status_code=400, detail="No documents supplied.")
+    demo = None
+    if req.demo_scenario:
+        from routes.demo import scenario
+        demo = scenario(req.demo_scenario)
     for doc in req.documents:
         try:
             p2_utils.inspect_input(base64.b64decode(doc.file_base64, validate=True))
@@ -355,7 +360,7 @@ def create_batch(req: BatchVerifyRequest) -> BatchJobResponse:
         applicant_id = f"APP-{uuid.uuid4().hex[:6].upper()}"
 
     job_id = jobs.create(applicant_id, len(req.documents))
-    jobs.update(job_id, document_stages=[{"filename": d.filename or "document", "stage": "queued"}
+    jobs.update(job_id, demo_scenario=demo, document_stages=[{"filename": d.filename or "document", "stage": "queued"}
                                         for d in req.documents])
     Thread(
         target=_process_batch,
