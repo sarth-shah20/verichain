@@ -3,9 +3,9 @@ import sys
 from pathlib import Path
 import fitz
 sys.path.insert(0,str(Path(__file__).parent))
+from routes.verify import _run_pipeline1
 from routes.demo import files, SCENARIOS
 from demo_records import reference, PAN
-from routes.verify import _run_pipeline1
 
 def test_six_scenarios_have_valid_synthetic_inputs():
     for scenario in SCENARIOS:

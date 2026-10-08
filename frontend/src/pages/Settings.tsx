@@ -1,8 +1,11 @@
+import { useEffect, useState } from "react";
 import { Moon, Sun, Server, CircleUserRound } from "lucide-react";
 import { useTheme } from "@/app/theme";
 
 export function Settings() {
   const { theme, toggle } = useTheme();
+  const [health, setHealth] = useState<{status:string; model_configured:boolean} | null>(null);
+  useEffect(() => { fetch(`${import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000"}/health`).then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(setHealth).catch(() => setHealth({status:"unreachable",model_configured:false})); }, []);
   const apiBase =
     import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -71,12 +74,13 @@ export function Settings() {
           <div className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3 dark:bg-slate-800/60">
             <span className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
               <Server className="h-4 w-4 text-pipeline1" />
-              Connected backend
+              {health?.status === "ok" ? "Backend reachable" : health ? "Backend unreachable" : "Checking backend…"}
             </span>
             <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs dark:bg-slate-800">
               {apiBase}
             </code>
           </div>
+          <p className="text-xs text-slate-500">Model configuration: {health ? health.model_configured ? "present (live connection checked during analysis)" : "not configured" : "checking"}. Reference records are local / synthetic.</p>
           <p className="text-xs text-slate-400">
             Point the app at a different host by setting{" "}
             <code className="rounded bg-slate-100 px-1 py-0.5 dark:bg-slate-800">

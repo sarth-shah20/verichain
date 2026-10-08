@@ -2,9 +2,9 @@ import type { Severity, Verdict } from "@/api/types";
 
 // ---------------------------------------------------------------------------
 // Trust / authenticity score (adjustable in one place). HIGHER = MORE genuine.
-//   70–100 → green  "Genuine"
-//   40–69  → amber  "Needs review"
-//   0–39   → red    "High risk / Likely forged"
+//   80–100 → green  "Genuine"
+//   60–79  → amber  "Needs review"
+//   0–59   → red    "High risk / Likely forged"
 // ---------------------------------------------------------------------------
 export const TRUST_THRESHOLDS = {
   review: 60,

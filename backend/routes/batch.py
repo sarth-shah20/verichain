@@ -24,6 +24,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Thread
 from typing import Any
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
@@ -414,78 +415,76 @@ def export_report(job_id: str):
 
 
 def _render_report_pdf(job: dict[str, Any], out_path: str) -> None:
+    """Readable evidence export, with honest coverage and source references."""
     import fitz
-
-    doc = fitz.open()
-    page = doc.new_page()
-    y = 50.0
-
+    import textwrap
+    import artifacts
+    document = fitz.open()
+    page = document.new_page()
+    y = 48.0
     def line(text: str, size: float = 10, bold: bool = False):
         nonlocal y, page
-        try:
-            # Wrap before truncating — no mid-word chopping, and long reason
-            # lists flow onto continued lines instead of disappearing.
-            parts = [text[i : i + 90] for i in range(0, len(text), 90)] or [""]
-            for p in parts:
-                if y > 780:
-                    page = doc.new_page()
-                    y = 50.0
-                try:
-                    page.insert_text((50, y), p, fontsize=size, fontname="helv" if not bold else "helv-bold")
-                except Exception:
-                    page.insert_text((50, y), p, fontsize=size)
-                y += size + 8
-        except Exception:
-            y += size + 8
-
-    line("VeriChain — Verification Report", 16, True)
-    y += 6
-    line(f"Application: {job.get('applicant_id', '—')}  |  Docs: {job.get('document_count', 0)}", 10)
-    line(f"Submitted: {job.get('submitted_at', '—')}", 10)
-    ov = job.get("overall") or {}
-    line(f"Overall: risk {ov.get('risk_score', '—')} | {ov.get('decision', '—')} | {ov.get('route_taken', '')}", 11, True)
-    y += 4
-    line("Top reasons:", 11, True)
-    for r in (ov.get("reasons") or [])[:5]:
-        line(f"  • {r}", 9)
-    if job.get("cross_document"):
-        y += 4
-        line("Cross-document findings:", 11, True)
-        for c in job["cross_document"][:6]:
-            line(f"  • [{c.get('severity','?')}] {c.get('label')}", 9)
-    y += 4
-    line("Documents:", 11, True)
-    for d in job.get("documents", [])[:8]:
-        line(f"  • {d.get('filename','doc')} — {d.get('document_type','?')} — score {d.get('risk_score','?')} ({d.get('decision','?')})", 9)
-        ev = (d.get("extracted_fields") or {})
-        if ev:
-            try:
-                sample = ", ".join(f"{k}={v}" for k, v in list(ev.items())[:5])
-                line(f"      fields: {sample}", 8)
-            except Exception:
-                pass
-    # Embed first heatmap per document when present.
-    for d in job.get("documents", [])[:4]:
-        url = d.get("heatmap_url")
-        if not url:
-            continue
-        rel = url.lstrip("/")
-        base = os.path.dirname(os.path.abspath(__file__))
-        fs_path = os.path.normpath(os.path.join(base, "..", rel.replace("artifacts", "artifacts", 1)))
-        # artifacts live under backend/artifacts
-        candidate = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", *rel.split("/")[1:])
-        candidate = os.path.normpath(candidate)
-        for p in (candidate, fs_path):
-            if os.path.exists(p):
-                try:
-                    hp = doc.new_page()
-                    hp.insert_text((50, 40), f"Heatmap — {d.get('filename','doc')}", fontsize=10, fontname="helv-bold")
-                    hp.insert_image(fitz.Rect(50, 60, 545, 760), filename=p)
-                except Exception:
-                    pass
-                break
-    doc.save(out_path)
-    doc.close()
+        text = str(text).replace("₹", "INR ").replace("→", " -> ").replace("—", "-")
+        for part in textwrap.wrap(text, width=85 if size <= 11 else 60) or [""]:
+            if y > 775:
+                page = document.new_page(); y = 48
+            page.insert_text((45, y), part, fontsize=size, fontname="hebo" if bold else "helv")
+            y += size + 7
+    def heading(text):
+        nonlocal y
+        y += 10; line(text, 12, True)
+    line("VeriChain | Evidence report", 18, True)
+    line("TARP course project - decision support; a human makes the final call.", 9)
+    line("Reference data: local / invented demonstration records, not a government portal.", 9)
+    heading(f"Application: {job.get('applicant_id', '-')}")
+    line(f"Submitted: {job.get('submitted_at', '-')}")
+    overall = job.get("overall") or {}
+    line(f"Authenticity: {overall.get('risk_score', '-')} / 100 | Recommendation: {overall.get('decision', '-')}", 11, True)
+    line("Score direction: higher = more authentic. Approve >=80; review 60-79; reject <60.", 9)
+    line(f"Analysis coverage: {job.get('analysis_status', 'legacy / unavailable')}")
+    for reason in overall.get("reasons") or []: line(f"Reason: {reason}", 9)
+    for warning in job.get("analysis_warnings") or []: line(f"Coverage warning: {warning}", 9)
+    heading("Human decision")
+    line(f"Recorded decision: {job.get('underwriter_decision') or 'Not recorded'}")
+    line(f"Reviewer note: {job.get('reviewer_note') or 'Not recorded'}")
+    if job.get("demo_scenario"):
+        heading("Synthetic demonstration")
+        line(job["demo_scenario"]["title"])
+        for expected in job["demo_scenario"].get("expected", []): line(f"Expected: {expected}",9)
+    for item in job.get("cross_document") or []:
+        heading(f"Across documents: {item.get('label', 'Finding')}")
+        line(f"[{item.get('severity', '?')}] {item.get('reason', '')}",9)
+    for item in job.get("reconciliation") or []:
+        heading(item.get("label", "Salary reconciliation"))
+        line(f"Status: {item.get('status')} | Net pay: INR {item.get('expected')} | Credit: INR {item.get('observed')} | Difference: INR {item.get('difference')}",9)
+        line(item.get("detail", ""),9)
+        line(f"Source: {item.get('bank_document_id', '-')} / page {item.get('page', '-')} / transaction {item.get('transaction_id', '-')}",9)
+    for item in job.get("documents") or []:
+        heading(f"{item.get('doc_id', '')} | {item.get('filename', 'Document')}")
+        line(f"Type: {item.get('document_type')} | Authenticity: {item.get('risk_score')} / 100 | {item.get('decision')}")
+        line(f"Content verification: {item.get('content_status', 'unavailable')} | Analysis: {item.get('analysis_status', 'legacy')}",9)
+        for field, value in (item.get("extracted_fields") or {}).items():
+            if not isinstance(value, (dict,list)): line(f"{field}: {value}",9)
+        for finding in item.get("findings") or []:
+            line(f"[{finding.get('state', finding.get('severity'))}] {finding.get('label')}: {finding.get('detail')}",9)
+            if finding.get("page"): line(f"Source: {item.get('filename')} / page {finding['page']} / evidence {finding.get('id')}",8)
+        for change in (item.get("revision_evidence") or {}).get("changes", []):
+            line(f"Recovered edit: {change.get('original_value')} -> {change.get('current_value')} | page {change.get('page_number')} | {change.get('weight')} materiality",9)
+        if not item.get("findings"): line("Structured findings unavailable for this older report.",9)
+        for row in (item.get("extracted_fields") or {}).get("transactions", []):
+            line(f"{row.get('date')} | {row.get('description')} | debit {row.get('debit')} | credit {row.get('credit')} | balance {row.get('balance')} | page {row.get('page')} | {row.get('transaction_id')}",8)
+    # Every original page remains inspectable in the export. Resolve only local artifacts.
+    root = Path(artifacts.artifacts_dir()).resolve()
+    for item in job.get("documents") or []:
+        for asset in item.get("page_assets") or []:
+            if not asset.get("url", "").startswith("/artifacts/"): continue
+            source = (root / asset["url"].removeprefix("/artifacts/")).resolve()
+            if not source.is_relative_to(root) or not source.is_file(): continue
+            preview = document.new_page()
+            preview.insert_text((45,35), f"Source: {item.get('filename')} | page {asset['page_number']}",fontsize=10)
+            preview.insert_image(fitz.Rect(45,55,550,785),filename=str(source),keep_proportion=True)
+    document.save(out_path)
+    document.close()
 
 
 @router.post("/{job_id}/decision")
