@@ -38,6 +38,7 @@ import utils as p2_utils
 
 import discrepancy as p2_discrepancy  # pipeline2/discrepancy.py
 from decision_policy import constrain_score
+from bank_reconciliation import reconcile_salary
 
 
 router = APIRouter(prefix="/verify/batch", tags=["verify"])
@@ -281,9 +282,12 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
             d = r["doc"]
             _log_blockchain(applicant_id, r["doc_hash"], d["risk_score"], d["decision"])
 
-        verification_reports = [
-            r["verification_report"] for r in ordered if r["ok"] and r["verification_report"]
-        ]
+        verification_reports = []
+        for index, r in enumerate(ordered):
+            if r["ok"] and r["verification_report"]:
+                r["verification_report"]["_doc_id"] = f"doc_{index}"
+                verification_reports.append(r["verification_report"])
+        reconciliation = reconcile_salary(verification_reports)
 
         # 2. Cross-document discrepancy analysis (needs ≥2 verifiable docs).
         cross_signals: list[dict[str, Any]] = []
@@ -294,6 +298,11 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
                 verification_reports
             )
             cross_signals = _map_cross(cross_report)
+        for item in reconciliation:
+            if item["status"] != "matched":
+                cross_signals.append({"label": item["label"], "reason": item["detail"],
+                    "severity": item["severity"], "source": "deterministic", "definitive": False,
+                    "check_code": item["check_code"], "document_ids": item["document_ids"]})
 
         # 3. Overall verdict: weakest-link across the per-document results (which
         #    already fuse content + forensics), escalated for cross-document
@@ -318,6 +327,7 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
             overall=overall,
             analysis_warnings=warnings,
             analysis_status="partial" if warnings else "complete",
+            reconciliation=reconciliation,
         )
         # Persist the completed verification so it survives restart, can be
         # reopened by job_id, and shows up in the History page.

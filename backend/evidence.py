@@ -22,7 +22,8 @@ def document_evidence(verification: dict, forensics: dict, holistic: dict) -> di
         state = "passed" if check.get("passed") is True else "failed" if check.get("passed") is False else "skipped"
         findings.append(finding("content", check["check"], check["check"].replace("_", " ").title(),
             check.get("detail", ""), check.get("severity", "info"), state=state,
-            field=check.get("field"), observed=check.get("document_value"), expected=check.get("expected")))
+            field=check.get("field"), observed=check.get("document_value"), expected=check.get("expected"),
+            page=check.get("page"), transaction_id=check.get("transaction_id")))
     for discrepancy in ver.get("discrepancies", []):
         if str(discrepancy.get("detail", "")).startswith("["):
             continue  # deterministic checks are already represented

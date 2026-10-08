@@ -145,6 +145,9 @@ def verify_document(extraction: dict[str, Any], db_response: dict[str, Any]) -> 
     # be fooled by an LLM, and catch invented PAN/Aadhaar/GSTIN values even when
     # the entity is outside our DB-of-record scope.
     det_findings = validators.run_validators(doc_type, extracted_fields)
+    if doc_type == "bank_statement":
+        from bank_reconciliation import statement_checks
+        det_findings.extend(statement_checks(extracted_fields))
 
     # Short-circuit: if the bank holds no authoritative record for this entity,
     # there is nothing to compare against. This is NOT fraud -- it is simply
