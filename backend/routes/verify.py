@@ -31,6 +31,7 @@ for _p in [str(_ROOT / "pipeline2"), str(_ROOT / "ai")]:
 # Pipeline 2 (flat imports — must come after sys.path)
 import pipeline as p2_pipeline  # pipeline2/pipeline.py
 import fusion as p2_fusion      # pipeline2/fusion.py
+from decision_policy import constrain_score, decide
 
 # Pipeline 1 (package imports — ai/ must be on sys.path)
 try:
@@ -295,11 +296,7 @@ def _decide(auth_score: int) -> tuple[str, str]:
     This matches the README demo table (APP001 genuine=96→approve, APP002 tampered=18→reject).
     The fusion LLM outputs a risk score (0=clean, 100=fraud) which we invert before routing.
     """
-    if auth_score >= 80:
-        return "route_1", "auto_approve"
-    if auth_score >= 60:
-        return "route_2", "human_review"
-    return "route_3", "auto_reject"
+    return decide(auth_score)
 
 
 def _resolve_issuer(verification_report: dict, document_type: str) -> str:
@@ -429,20 +426,15 @@ def _holistic_to_api(
     The fusion LLM emits a risk score (0=clean, 100=fraud); the API contract
     uses an authenticity score (higher=genuine), so we invert.
     """
-    fusion_risk = int(holistic.get("fusion", {}).get("overall_risk_score", 50))
-    risk_score = 100 - fusion_risk
-
-    # Band-edge polish: never route to auto_approve on advisory-only forensics
-    # with no DB-of-record confirmation. If the document is unverified and there
-    # are no corroborated suspects, pin the decision at human_review.
-    try:
-        no_db = ((verification_report.get("verification") or {}).get("match_status") in (None, "unverified"))
-        adv = (forensics_report or {}).get("advisory_pixel_forensics") or {}
-        no_suspects = not (adv.get("evidence") or {}).get("suspect_regions")
-        if no_db and no_suspects and risk_score >= 80:
-            risk_score = 79
-    except Exception:
-        pass
+    fusion = holistic.get("fusion", {})
+    raw = fusion.get("overall_risk_score")
+    valid = type(raw) is int and 0 <= raw <= 100
+    risk_score, policy_reasons = constrain_score(
+        100 - raw if valid else None,
+        verification_report,
+        forensics_report,
+        incomplete=bool(fusion.get("fallback")) or not valid,
+    )
     route_taken, decision = _decide(risk_score)
 
     reasons = [
@@ -451,6 +443,7 @@ def _holistic_to_api(
     ]
     if not reasons:
         reasons = [holistic.get("fusion", {}).get("rationale", "No specific flags raised.")]
+    reasons = list(dict.fromkeys(policy_reasons + reasons))
 
     # The recovered before/after value is the headline evidence for an edited PDF
     # — surface it first, in both the frozen single-doc reasons[] and the batch.

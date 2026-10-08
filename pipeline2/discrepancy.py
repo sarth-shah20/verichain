@@ -132,6 +132,12 @@ def _deterministic_cross(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             )
     # 3. Annualized-income consistency (LLM-free, cannot be talked out of it).
     out.extend(_income_cross_check(docs))
+    for finding in out:
+        finding["source"] = "deterministic"
+        finding["definitive"] = finding["attribute"] in {"PAN", "GSTIN / PAN"}
+        finding["check_code"] = {
+            "PAN": "pan_consistency", "GSTIN / PAN": "gstin_pan_consistency",
+        }.get(finding["attribute"], "income_estimate")
 
     return out
 
@@ -188,12 +194,11 @@ def _income_cross_check(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                             f"ITR gross {itr_year:,.0f}/yr",
                             f"salary slip {slip_year:,.0f}/yr (monthly x12)",
                         ],
-                        "severity": "high",
+                        "severity": "medium",
                         "detail": (
                             f"Annualized salary-slip income differs from the ITR's "
-                            f"annual gross by {gap*100:.0f}% — income is understated "
-                            f"on at least one document (a classic loan-file fraud "
-                            f"signal)."
+                            f"annual gross by {gap*100:.0f}%. Monthly ×12 is an estimate; "
+                            "check employment and assessment periods before drawing a conclusion."
                         ),
                     }
                 )
@@ -255,17 +260,38 @@ def find_cross_document_discrepancies(
         raise ValueError("Need at least 2 verification reports to cross-check.")
 
     docs = _collect_docs(reports)
-    cross = llm_client.call_text(_CROSS_SYSTEM, _build_user_prompt(docs), json_mode=True)
+    det_cross = _deterministic_cross(docs)
+    warnings: list[str] = []
+    try:
+        cross = llm_client.call_text(_CROSS_SYSTEM, _build_user_prompt(docs), json_mode=True)
+        if not isinstance(cross, dict) or not isinstance(cross.get("discrepancies", []), list):
+            raise ValueError("Invalid cross-document result")
+    except Exception:
+        warnings.append("AI cross-document analysis could not complete; deterministic checks are retained.")
+        cross = {"entity_consistency": "unverified", "discrepancies": [],
+                 "consistent_attributes": [], "summary": warnings[0]}
 
     # Fold in deterministic identifier cross-checks (PAN consistency, GSTIN<->PAN).
     # These are high-confidence and must not be diluted by the LLM's judgement, so
     # we prepend them and force inconsistency when any deterministic conflict fires.
-    det_cross = _deterministic_cross(docs)
     if det_cross:
         cross.setdefault("discrepancies", [])
         existing = cross["discrepancies"]
         cross["discrepancies"] = det_cross + (existing if isinstance(existing, list) else [])
         cross["entity_consistency"] = "inconsistent"
+
+    unique: list[dict] = []
+    seen: set[tuple] = set()
+    for finding in cross.get("discrepancies", []):
+        if not isinstance(finding, dict):
+            continue
+        attribute = str(finding.get("attribute", "")).lower()
+        canonical = "income" if "income" in attribute else "pan" if attribute == "pan" else attribute
+        key = (canonical, tuple(sorted(finding.get("documents", []))))
+        if key not in seen:
+            unique.append(finding)
+            seen.add(key)
+    cross["discrepancies"] = unique
 
     report: dict[str, Any] = {
         "report_type": "cross_document_discrepancy",
@@ -273,6 +299,7 @@ def find_cross_document_discrepancies(
         "document_count": len(reports),
         "documents": [d["label"] for d in docs],
         "cross_document": cross,
+        "analysis_warnings": warnings,
     }
     report["summary_text"] = _readable_summary(report)
 

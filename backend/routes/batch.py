@@ -36,6 +36,7 @@ import store
 from routes.verify import process_document, _decide, _log_blockchain
 
 import discrepancy as p2_discrepancy  # pipeline2/discrepancy.py
+from decision_policy import constrain_score
 
 
 router = APIRouter(prefix="/verify/batch", tags=["verify"])
@@ -109,6 +110,9 @@ def _map_cross(cross_report: dict[str, Any]) -> list[dict[str, Any]]:
                 "label": f"{d.get('attribute', 'Attribute')} differs across documents",
                 "reason": reason,
                 "severity": d.get("severity", "medium"),
+                "source": d.get("source", "model"),
+                "check_code": d.get("check_code", "semantic_consistency"),
+                "definitive": d.get("definitive", False),
             }
         )
     return out
@@ -135,20 +139,19 @@ def _overall_from_documents(
     """
     if not documents_out:
         return {
-            "risk_score": 50,
+            "risk_score": 70,
             "route_taken": "route_2",
             "decision": "human_review",
             "reasons": ["No documents could be verified."],
         }
 
-    min_auth = min(int(d.get("risk_score", 50)) for d in documents_out)
+    min_auth = min(int(d.get("risk_score", 70)) for d in documents_out)
 
     # Cross-document inconsistency is itself a fraud signal not visible per-doc.
-    severities = {c.get("severity") for c in cross_signals}
-    if "high" in severities:
+    if min_auth >= 60:
+        min_auth, _ = constrain_score(min_auth, [], cross_findings=cross_signals)
+    elif any(c.get("definitive") for c in cross_signals):
         min_auth = min(min_auth, 40)
-    elif "medium" in severities:
-        min_auth = min(min_auth, 70)
 
     route_taken, decision = _decide(min_auth)
 
@@ -201,7 +204,7 @@ def _process_one(doc: BatchDocument) -> dict[str, Any]:
             "doc": {
                 "filename": doc.filename or "document",
                 "document_type": doc.document_type,
-                "risk_score": 50,
+                "risk_score": 70,
                 "route_taken": "route_2",
                 "decision": "human_review",
                 "reasons": [f"Could not process this document: {exc}"],
@@ -212,6 +215,7 @@ def _process_one(doc: BatchDocument) -> dict[str, Any]:
                     "matched_fields": [],
                 },
                 "extracted_fields": {},
+                "analysis_warnings": ["Document processing could not complete."],
             },
         }
 
@@ -281,6 +285,12 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
         #    the hero verdict can never contradict the document cards.
         jobs.update(job_id, progress=94)
         overall = _overall_from_documents(documents_out, cross_signals)
+        warnings = (cross_report or {}).get("analysis_warnings", [])
+        if warnings and overall["risk_score"] >= 80:
+            overall["risk_score"] = 79
+            overall["route_taken"], overall["decision"] = _decide(79)
+        if warnings:
+            overall["reasons"] = warnings + overall["reasons"]
 
         jobs.update(
             job_id,
@@ -289,6 +299,7 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
             documents=documents_out,
             cross_document=cross_signals,
             overall=overall,
+            analysis_warnings=warnings,
         )
         # Persist the completed verification so it survives restart, can be
         # reopened by job_id, and shows up in the History page.
