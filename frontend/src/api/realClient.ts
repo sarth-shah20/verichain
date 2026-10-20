@@ -113,6 +113,7 @@ export class RealVeriChainApi implements VeriChainApi {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         applicant_id: options.application_id?.trim() || undefined,
+        demo_scenario: options.demo_scenario,
         documents,
       }),
     });
@@ -138,16 +139,18 @@ export class RealVeriChainApi implements VeriChainApi {
         job_id: jobId,
         status: "done",
         progress: 100,
+        document_stages: job.document_stages,
         result: buildResultFromBatch(job, this.baseUrl, this.thumbsFor(jobId)),
       };
     }
     if (job.status === "error") {
-      return { job_id: jobId, status: "error", progress: 100, result: null };
+      return { job_id: jobId, status: "error", progress: 100, result: null, error: job.error };
     }
     return {
       job_id: jobId,
       status: "processing",
       progress: job.progress ?? 0,
+      document_stages: job.document_stages,
       result: null,
     };
   }
@@ -183,11 +186,11 @@ export class RealVeriChainApi implements VeriChainApi {
     }));
   }
 
-  async recordDecision(jobId: string, decision: UnderwriterDecision): Promise<void> {
+  async recordDecision(jobId: string, decision: UnderwriterDecision, note?: string | null): Promise<void> {
     const res = await fetch(this.url(`/verify/batch/${encodeURIComponent(jobId)}/decision`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ decision }),
+      body: JSON.stringify({ decision, note: note ?? undefined }),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");

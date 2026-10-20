@@ -15,18 +15,14 @@ from typing import Any
 import llm_client
 import utils
 import validators
+from decision_policy import DEFINITIVE_CHECKS
 
 # Deterministic checks whose failure is mathematically definitive (a wrong
 # checksum / malformed identifier cannot be a benign OCR variant), so they force
 # the overall match_status to "mismatch". The surname-initial check is strong
 # evidence but stays advisory (it can be affected by name-extraction quality),
 # so it is surfaced as a discrepancy without single-handedly forcing a mismatch.
-_DEFINITIVE_CHECKS = {
-    "pan_structure", "pan_holder_type",
-    "aadhaar_verhoeff",
-    "gstin_structure", "gstin_state_code", "gstin_checksum", "gstin_embedded_pan",
-    "payslip_arithmetic",
-}
+_DEFINITIVE_CHECKS = DEFINITIVE_CHECKS
 
 _VERIFY_SYSTEM = """You are a verification analyst for a bank's loan-underwriting
 pipeline.
@@ -149,6 +145,9 @@ def verify_document(extraction: dict[str, Any], db_response: dict[str, Any]) -> 
     # be fooled by an LLM, and catch invented PAN/Aadhaar/GSTIN values even when
     # the entity is outside our DB-of-record scope.
     det_findings = validators.run_validators(doc_type, extracted_fields)
+    if doc_type == "bank_statement":
+        from bank_reconciliation import statement_checks
+        det_findings.extend(statement_checks(extracted_fields))
 
     # Short-circuit: if the bank holds no authoritative record for this entity,
     # there is nothing to compare against. This is NOT fraud -- it is simply

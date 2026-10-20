@@ -16,6 +16,13 @@ export default {
           "Arial",
           "sans-serif",
         ],
+        mono: [
+          "JetBrains Mono",
+          "ui-monospace",
+          "SFMono-Regular",
+          "Menlo",
+          "monospace",
+        ],
       },
       colors: {
         // Pipeline 1 — Authenticity & Forensics
@@ -55,10 +62,15 @@ export default {
         shimmer: {
           "100%": { transform: "translateX(100%)" },
         },
+        "score-in": {
+          "0%": { opacity: "0", transform: "scale(0.96)" },
+          "100%": { opacity: "1", transform: "scale(1)" },
+        },
       },
       animation: {
         "fade-in": "fade-in 0.25s ease-out",
         "slide-in": "slide-in 0.2s ease-out",
+        "score-in": "score-in 0.5s ease-out",
       },
     },
   },

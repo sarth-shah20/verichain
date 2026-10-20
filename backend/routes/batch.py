@@ -19,10 +19,12 @@ concurrently within it.
 from __future__ import annotations
 
 import base64
+import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Thread
 from typing import Any
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
@@ -33,8 +35,11 @@ import store
 # Importing verify first runs its sys.path surgery (adds pipeline2/ + ai/),
 # so the flat pipeline2 imports below resolve.
 from routes.verify import process_document, _decide, _log_blockchain
+import utils as p2_utils
 
 import discrepancy as p2_discrepancy  # pipeline2/discrepancy.py
+from decision_policy import constrain_score
+from bank_reconciliation import reconcile_salary
 
 
 router = APIRouter(prefix="/verify/batch", tags=["verify"])
@@ -54,6 +59,7 @@ class BatchDocument(BaseModel):
 class BatchVerifyRequest(BaseModel):
     applicant_id: str | None = None
     documents: list[BatchDocument]
+    demo_scenario: str | None = None
 
 
 class BatchJobResponse(BaseModel):
@@ -108,6 +114,9 @@ def _map_cross(cross_report: dict[str, Any]) -> list[dict[str, Any]]:
                 "label": f"{d.get('attribute', 'Attribute')} differs across documents",
                 "reason": reason,
                 "severity": d.get("severity", "medium"),
+                "source": d.get("source", "model"),
+                "check_code": d.get("check_code", "semantic_consistency"),
+                "definitive": d.get("definitive", False),
             }
         )
     return out
@@ -134,20 +143,19 @@ def _overall_from_documents(
     """
     if not documents_out:
         return {
-            "risk_score": 50,
+            "risk_score": 70,
             "route_taken": "route_2",
             "decision": "human_review",
             "reasons": ["No documents could be verified."],
         }
 
-    min_auth = min(int(d.get("risk_score", 50)) for d in documents_out)
+    min_auth = min(int(d.get("risk_score", 70)) for d in documents_out)
 
     # Cross-document inconsistency is itself a fraud signal not visible per-doc.
-    severities = {c.get("severity") for c in cross_signals}
-    if "high" in severities:
+    if min_auth >= 60:
+        min_auth, _ = constrain_score(min_auth, [], cross_findings=cross_signals)
+    elif any(c.get("definitive") for c in cross_signals):
         min_auth = min(min_auth, 40)
-    elif "medium" in severities:
-        min_auth = min(min_auth, 70)
 
     route_taken, decision = _decide(min_auth)
 
@@ -175,19 +183,21 @@ def _overall_from_documents(
 
 # ─── Background processing ─────────────────────────────────────────────────────
 
-def _process_one(doc: BatchDocument) -> dict[str, Any]:
+def _process_one(doc: BatchDocument, on_stage=None) -> dict[str, Any]:
     """Verify a single document; never raises (errors become a soft verdict)."""
     try:
-        file_bytes = base64.b64decode(doc.file_base64)
-        out = process_document(file_bytes, doc.document_type)
+        file_bytes = base64.b64decode(doc.file_base64, validate=True)
+        out = process_document(file_bytes, doc.document_type, on_stage=on_stage)
         api = out["api"]
         return {
             "ok": True,
             "verification_report": out["verification_report"],
             "doc_hash": out["doc_hash"],
+            "heatmap_pages": out.get("heatmap_pages") or [],
+            "preview_pages": out.get("preview_pages") or [],
             "doc": {
                 "filename": doc.filename or "document",
-                "document_type": doc.document_type,
+                "document_type": out["verification_report"].get("document", {}).get("doc_type", doc.document_type),
                 **api,
             },
         }
@@ -199,7 +209,7 @@ def _process_one(doc: BatchDocument) -> dict[str, Any]:
             "doc": {
                 "filename": doc.filename or "document",
                 "document_type": doc.document_type,
-                "risk_score": 50,
+                "risk_score": 70,
                 "route_taken": "route_2",
                 "decision": "human_review",
                 "reasons": [f"Could not process this document: {exc}"],
@@ -210,6 +220,9 @@ def _process_one(doc: BatchDocument) -> dict[str, Any]:
                     "matched_fields": [],
                 },
                 "extracted_fields": {},
+                "analysis_warnings": ["Document processing could not complete."],
+                "analysis_status": "partial",
+                "content_status": "unverified",
             },
         }
 
@@ -221,24 +234,62 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
 
         # 1. Per-document pipelines, concurrently.
         with ThreadPoolExecutor(max_workers=min(4, max(1, total))) as ex:
-            futures = {ex.submit(_process_one, d): i for i, d in enumerate(documents)}
+            futures = {ex.submit(_process_one, d, lambda stage, index=i: jobs.set_stage(job_id, index, stage)): i
+                       for i, d in enumerate(documents)}
             done = 0
             for fut in as_completed(futures):
                 results[futures[fut]] = fut.result()
+                value = results[futures[fut]]
+                jobs.set_stage(job_id, futures[fut], "partial" if value["doc"].get("analysis_warnings") else "completed")
                 done += 1
                 jobs.update(job_id, progress=int(done / total * 80))
 
         ordered = [results[i] for i in range(total)]
+        # Persist heatmap PNGs now that job_id + doc index are known. Binary
+        # stays on disk; only the URL travels in the stored job JSON.
+        try:
+            import artifacts as _artifacts
+
+            for idx, r in enumerate(ordered):
+                original_pages = []
+                for pg in r.get("preview_pages") or []:
+                    url = _artifacts.save_preview(job_id, idx, pg["page_number"], pg["png_bytes"])
+                    original_pages.append({"page_number": pg["page_number"], "url": url})
+                r["doc"]["page_assets"] = original_pages
+                pages = r.get("heatmap_pages") or []
+                if not pages:
+                    continue
+                saved = []
+                for pg in pages[:3]:
+                    try:
+                        url = _artifacts.save_heatmap(
+                            job_id, idx, max(1, pg["page_number"]), pg["png_bytes"]
+                        )
+                        saved.append({"page_number": max(1, pg["page_number"]), "url": url})
+                    except Exception:
+                        continue
+                if saved:
+                    r["doc"]["heatmap_url"] = saved[0]["url"]
+                    r["doc"]["heatmap_pages"] = saved
+        except Exception:
+            pass
         documents_out = [r["doc"] for r in ordered]
+        for index, doc in enumerate(documents_out):
+            doc["doc_id"] = f"doc_{index}"
+            for item in doc.get("findings", []):
+                item["document_ids"] = [doc["doc_id"]]
 
         # Blockchain audit log per document.
         for r in ordered:
             d = r["doc"]
             _log_blockchain(applicant_id, r["doc_hash"], d["risk_score"], d["decision"])
 
-        verification_reports = [
-            r["verification_report"] for r in ordered if r["ok"] and r["verification_report"]
-        ]
+        verification_reports = []
+        for index, r in enumerate(ordered):
+            if r["ok"] and r["verification_report"]:
+                r["verification_report"]["_doc_id"] = f"doc_{index}"
+                verification_reports.append(r["verification_report"])
+        reconciliation = reconcile_salary(verification_reports)
 
         # 2. Cross-document discrepancy analysis (needs ≥2 verifiable docs).
         cross_signals: list[dict[str, Any]] = []
@@ -249,6 +300,11 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
                 verification_reports
             )
             cross_signals = _map_cross(cross_report)
+        for item in reconciliation:
+            if item["status"] != "matched":
+                cross_signals.append({"label": item["label"], "reason": item["detail"],
+                    "severity": item["severity"], "source": "deterministic", "definitive": False,
+                    "check_code": item["check_code"], "document_ids": item["document_ids"]})
 
         # 3. Overall verdict: weakest-link across the per-document results (which
         #    already fuse content + forensics), escalated for cross-document
@@ -256,6 +312,13 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
         #    the hero verdict can never contradict the document cards.
         jobs.update(job_id, progress=94)
         overall = _overall_from_documents(documents_out, cross_signals)
+        warnings = list((cross_report or {}).get("analysis_warnings", []))
+        warnings += [f"{d['filename']}: {w}" for d in documents_out for w in d.get("analysis_warnings", [])]
+        if warnings and overall["risk_score"] >= 80:
+            overall["risk_score"] = 79
+            overall["route_taken"], overall["decision"] = _decide(79)
+        if warnings:
+            overall["reasons"] = warnings + overall["reasons"]
 
         jobs.update(
             job_id,
@@ -264,6 +327,9 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
             documents=documents_out,
             cross_document=cross_signals,
             overall=overall,
+            analysis_warnings=warnings,
+            analysis_status="partial" if warnings else "complete",
+            reconciliation=reconciliation,
         )
         # Persist the completed verification so it survives restart, can be
         # reopened by job_id, and shows up in the History page.
@@ -280,12 +346,23 @@ def _process_batch(job_id: str, applicant_id: str, documents: list[BatchDocument
 def create_batch(req: BatchVerifyRequest) -> BatchJobResponse:
     if not req.documents:
         raise HTTPException(status_code=400, detail="No documents supplied.")
+    demo = None
+    if req.demo_scenario:
+        from routes.demo import scenario
+        demo = scenario(req.demo_scenario)
+    for doc in req.documents:
+        try:
+            p2_utils.inspect_input(base64.b64decode(doc.file_base64, validate=True))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"{doc.filename or 'Document'}: {exc}") from exc
 
     applicant_id = (req.applicant_id or "").strip()
     if not applicant_id:
         applicant_id = f"APP-{uuid.uuid4().hex[:6].upper()}"
 
     job_id = jobs.create(applicant_id, len(req.documents))
+    jobs.update(job_id, demo_scenario=demo, document_stages=[{"filename": d.filename or "document", "stage": "queued"}
+                                        for d in req.documents])
     Thread(
         target=_process_batch,
         args=(job_id, applicant_id, req.documents),
@@ -296,6 +373,7 @@ def create_batch(req: BatchVerifyRequest) -> BatchJobResponse:
 
 class DecisionRequest(BaseModel):
     decision: str  # "approved" | "review" | "rejected"
+    note: str | None = None
 
 
 _VALID_DECISIONS = {"approved", "review", "rejected"}
@@ -317,14 +395,108 @@ def get_batch(job_id: str, response: Response) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="Unknown job id.")
 
 
+@router.get("/{job_id}/report.pdf")
+def export_report(job_id: str):
+    """Printable/audit PDF for one verification (additive route)."""
+    job = jobs.get(job_id) or store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown job id.")
+    try:
+        import artifacts as _a
+
+        out_dir = _a.ensure_dir(job_id)
+        out_path = out_dir / "report.pdf"
+        _render_report_pdf(job, str(out_path))
+        from fastapi.responses import FileResponse
+
+        return FileResponse(str(out_path), media_type="application/pdf", filename=f"verichain_{job_id}_report.pdf")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Report failed: {exc}")
+
+
+def _render_report_pdf(job: dict[str, Any], out_path: str) -> None:
+    """Readable evidence export, with honest coverage and source references."""
+    import fitz
+    import textwrap
+    import artifacts
+    document = fitz.open()
+    page = document.new_page()
+    y = 48.0
+    def line(text: str, size: float = 10, bold: bool = False):
+        nonlocal y, page
+        text = str(text).replace("₹", "INR ").replace("→", " -> ").replace("—", "-")
+        for part in textwrap.wrap(text, width=85 if size <= 11 else 60) or [""]:
+            if y > 775:
+                page = document.new_page(); y = 48
+            page.insert_text((45, y), part, fontsize=size, fontname="hebo" if bold else "helv")
+            y += size + 7
+    def heading(text):
+        nonlocal y
+        y += 10; line(text, 12, True)
+    line("VeriChain | Evidence report", 18, True)
+    line("TARP course project - decision support; a human makes the final call.", 9)
+    line("Reference data: local / invented demonstration records, not a government portal.", 9)
+    heading(f"Application: {job.get('applicant_id', '-')}")
+    line(f"Submitted: {job.get('submitted_at', '-')}")
+    overall = job.get("overall") or {}
+    line(f"Authenticity: {overall.get('risk_score', '-')} / 100 | Recommendation: {overall.get('decision', '-')}", 11, True)
+    line("Score direction: higher = more authentic. Approve >=80; review 60-79; reject <60.", 9)
+    line(f"Analysis coverage: {job.get('analysis_status', 'legacy / unavailable')}")
+    for reason in overall.get("reasons") or []: line(f"Reason: {reason}", 9)
+    for warning in job.get("analysis_warnings") or []: line(f"Coverage warning: {warning}", 9)
+    heading("Human decision")
+    line(f"Recorded decision: {job.get('underwriter_decision') or 'Not recorded'}")
+    line(f"Reviewer note: {job.get('reviewer_note') or 'Not recorded'}")
+    if job.get("demo_scenario"):
+        heading("Synthetic demonstration")
+        line(job["demo_scenario"]["title"])
+        for expected in job["demo_scenario"].get("expected", []): line(f"Expected: {expected}",9)
+    for item in job.get("cross_document") or []:
+        heading(f"Across documents: {item.get('label', 'Finding')}")
+        line(f"[{item.get('severity', '?')}] {item.get('reason', '')}",9)
+    for item in job.get("reconciliation") or []:
+        heading(item.get("label", "Salary reconciliation"))
+        line(f"Status: {item.get('status')} | Net pay: INR {item.get('expected')} | Credit: INR {item.get('observed')} | Difference: INR {item.get('difference')}",9)
+        line(item.get("detail", ""),9)
+        line(f"Source: {item.get('bank_document_id', '-')} / page {item.get('page', '-')} / transaction {item.get('transaction_id', '-')}",9)
+    for item in job.get("documents") or []:
+        heading(f"{item.get('doc_id', '')} | {item.get('filename', 'Document')}")
+        line(f"Type: {item.get('document_type')} | Authenticity: {item.get('risk_score')} / 100 | {item.get('decision')}")
+        line(f"Content verification: {item.get('content_status', 'unavailable')} | Analysis: {item.get('analysis_status', 'legacy')}",9)
+        for field, value in (item.get("extracted_fields") or {}).items():
+            if not isinstance(value, (dict,list)): line(f"{field}: {value}",9)
+        for finding in item.get("findings") or []:
+            line(f"[{finding.get('state', finding.get('severity'))}] {finding.get('label')}: {finding.get('detail')}",9)
+            if finding.get("page"): line(f"Source: {item.get('filename')} / page {finding['page']} / evidence {finding.get('id')}",8)
+        for change in (item.get("revision_evidence") or {}).get("changes", []):
+            line(f"Recovered edit: {change.get('original_value')} -> {change.get('current_value')} | page {change.get('page_number')} | {change.get('weight')} materiality",9)
+        if not item.get("findings"): line("Structured findings unavailable for this older report.",9)
+        for row in (item.get("extracted_fields") or {}).get("transactions", []):
+            line(f"{row.get('date')} | {row.get('description')} | debit {row.get('debit')} | credit {row.get('credit')} | balance {row.get('balance')} | page {row.get('page')} | {row.get('transaction_id')}",8)
+    # Every original page remains inspectable in the export. Resolve only local artifacts.
+    root = Path(artifacts.artifacts_dir()).resolve()
+    for item in job.get("documents") or []:
+        for asset in item.get("page_assets") or []:
+            if not asset.get("url", "").startswith("/artifacts/"): continue
+            source = (root / asset["url"].removeprefix("/artifacts/")).resolve()
+            if not source.is_relative_to(root) or not source.is_file(): continue
+            preview = document.new_page()
+            preview.insert_text((45,35), f"Source: {item.get('filename')} | page {asset['page_number']}",fontsize=10)
+            preview.insert_image(fitz.Rect(45,55,550,785),filename=str(source),keep_proportion=True)
+    document.save(out_path)
+    document.close()
+
+
 @router.post("/{job_id}/decision")
 def record_decision(job_id: str, req: DecisionRequest) -> dict[str, Any]:
     """Record the underwriter's final decision (persisted + written to audit log)."""
     if req.decision not in _VALID_DECISIONS:
         raise HTTPException(status_code=400, detail="Invalid decision.")
-    result = store.record_decision(job_id, req.decision)
+    if not req.note or not req.note.strip():
+        raise HTTPException(status_code=400, detail="A reviewer note is required.")
+    result = store.record_decision(job_id, req.decision, req.note)
     if result is None:
         raise HTTPException(status_code=404, detail="Verification not found.")
     # Keep the in-memory job (if still live) in sync so a poll reflects it.
-    jobs.update(job_id, underwriter_decision=req.decision)
+    jobs.update(job_id, underwriter_decision=req.decision, reviewer_note=req.note.strip())
     return {"recorded": True, "job_id": job_id, **result}

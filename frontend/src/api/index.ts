@@ -6,7 +6,7 @@ import { RealVeriChainApi } from "./realClient";
 // VITE_API_BASE_URL (defaults to http://localhost:8000).
 // ---------------------------------------------------------------------------
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 export const api: VeriChainApi = new RealVeriChainApi(API_BASE_URL);
 

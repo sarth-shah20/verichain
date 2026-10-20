@@ -209,8 +209,10 @@ class PixelForensicsResult(BaseModel):
     dct_ran: bool
     noise_ran: bool
     copy_move_ran: bool
+    ghost_ran: bool = False
     watermark_detected: bool = False
     watermark_coverage: float = 0.0
+    watermark_suppression_applied: bool = True
     suspect_regions: list[SuspectRegion]
     low_confidence: bool = False
     warnings: list[str] = Field(default_factory=list)

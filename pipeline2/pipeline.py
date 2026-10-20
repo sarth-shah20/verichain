@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 from typing import Any
+from collections.abc import Callable
 
 import db
 import extract
@@ -46,6 +47,7 @@ def verify_document_file(
     path: str,
     doc_type: str | None = None,
     out_dir: str | None = None,
+    on_stage: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """
     Run the full verification pipeline for one document.
@@ -54,6 +56,8 @@ def verify_document_file(
     <name>.verification.json and <name>.verification.txt there.
     """
     # 1. Extract + normalize.
+    if on_stage:
+        on_stage("extraction")
     extraction = extract.extract_document(path, doc_type)
     schema_meta = extraction["_schema"]
 
@@ -65,6 +69,8 @@ def verify_document_file(
     )
 
     # 3. Verify (separate session).
+    if on_stage:
+        on_stage("validation")
     verification = verify.verify_document(extraction, db_response)
 
     # 4. Assemble the report.
@@ -87,6 +93,7 @@ def verify_document_file(
         },
         "database": db_response,
         "verification": verification,
+        "analysis_warnings": extraction.get("analysis_warnings", []),
     }
     report["summary_text"] = _readable_summary(report)
 

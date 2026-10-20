@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VeriChain — Architecture Mindmap</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --border: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --pipeline1: #14b8a6;
+    --pipeline2: #8b5cf6;
+    --fusion: #f59e0b;
+    --backend: #3b82f6;
+    --frontend: #f97316;
+    --data: #22c55e;
+    --risk-high: #ef4444;
+    --risk-med: #f59e0b;
+    --risk-low: #22c55e;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem 1rem;
+  }
+  h1 {
+    font-size: 2.25rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.25rem;
+    background: linear-gradient(135deg, var(--pipeline1), var(--pipeline2), var(--fusion));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin-bottom: 2rem;
+  }
+  .mindmap {
+    width: 100%;
+    max-width: 1400px;
+  }
+  /* ── Root node ── */
+  .root-node {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 2rem;
+  }
+  .root-box {
+    background: linear-gradient(135deg, #1e40af, #3730a3);
+    border: 2px solid #6366f1;
+    border-radius: 16px;
+    padding: 16px 36px;
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: #fff;
+    text-align: center;
+    box-shadow: 0 0 48px rgba(99,102,241,0.25);
+  }
+  .root-box small {
+    display: block;
+    font-weight: 400;
+    font-size: 0.75rem;
+    opacity: 0.7;
+    margin-top: 4px;
+  }
+  /* ── Connector lines (CSS-only) ── */
+  .branches {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 24px;
+  }
+  .branch {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .branch-header {
+    padding: 14px 18px;
+    font-weight: 700;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    letter-spacing: -0.01em;
+  }
+  .branch-header .dot {
+    width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+  }
+  .branch-body { padding: 8px 18px 16px; }
+  .branch-body ul { list-style: none; }
+  .branch-body li {
+    padding: 5px 0;
+    padding-left: 16px;
+    position: relative;
+    font-size: 0.85rem;
+    color: var(--muted);
+    line-height: 1.45;
+  }
+  .branch-body li::before {
+    content: "└";
+    position: absolute; left: 0; top: 4px;
+    color: var(--border);
+  }
+  .branch-body li strong { color: var(--text); font-weight: 600; }
+  .branch-body li em {
+    font-style: normal;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    margin-left: 4px;
+  }
+  .tag-tier { background: rgba(20,184,166,0.15); color: var(--pipeline1); }
+  .tag-p1 { background: rgba(20,184,166,0.15); color: var(--pipeline1); }
+  .tag-p2 { background: rgba(139,92,246,0.15); color: var(--pipeline2); }
+  .tag-fusion { background: rgba(245,158,11,0.15); color: var(--fusion); }
+  .tag-api { background: rgba(59,130,246,0.15); color: var(--backend); }
+  .tag-fe { background: rgba(249,115,22,0.15); color: var(--frontend); }
+  .tag-db { background: rgba(34,197,94,0.15); color: var(--data); }
+  .tag-risk { background: rgba(239,68,68,0.15); color: var(--risk-high); }
+
+  /* ── Flow summary ── */
+  .flow {
+    grid-column: 1 / -1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px;
+    margin-top: 8px;
+  }
+  .flow h2 {
+    font-size: 0.95rem;
+    margin-bottom: 12px;
+    color: var(--accent);
+  }
+  .flow-diagram {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  .flow-node {
+    padding: 8px 14px;
+    border-radius: 8px;
+    white-space: nowrap;
+  }
+  .flow-arrow { font-size: 1.1rem; color: var(--border); }
+</style>
+</head>
+<body>
+<h1>VeriChain</h1>
+<p class="subtitle">Architecture Mindmap — Multi-Modal Document Fraud Detection for Loan Underwriting</p>
+
+<div class="mindmap">
+  <div class="root-node">
+    <div class="root-box">
+      VeriChain
+      <small>Real-time document tampering & forgery detection</small>
+    </div>
+  </div>
+
+  <div class="branches">
+
+    <!-- ── 1. FRONTEND ── -->
+    <div class="branch">
+      <div class="branch-header">
+        <span class="dot" style="background:var(--frontend)"></span>
+        Frontend — React + Vite + TypeScript
+      </div>
+      <div class="branch-body"><ul>
+        <li><strong>Router</strong> (app/router.tsx)
+          <em class="tag-fe">React Router 6</em></li>
+        <li><strong>Pages</strong></li>
+        <li>└ NewVerification <em class="tag-fe">upload+queue</em> — FileDropzone, doc-type select, multi-file queue → submit batch</li>
+        <li>└ Processing — polls GET /verify/batch/{job_id} every 600ms, progress bar</li>
+        <li>└ Results — hero verdict gauge, cross-doc signals, document cards, underwriter Approve/Review/Reject buttons with "Recommended" badge</li>
+        <li>└ DocumentDetail — side-by-side viewer + signal cards, severity filter, BeforeAfterPanel for PDF revision recovery</li>
+        <li>└ History — persisted verification log, soft-delete</li>
+        <li>└ Settings</li>
+        <li><strong>API Client</strong> (api/realClient.ts → adapter.ts)</li>
+        <li>└ Submits batch via <strong>POST /verify/batch</strong></li>
+        <li>└ Polls <strong>GET /verify/batch/{job_id}</strong> for job status</li>
+        <li>└ Reads <strong>GET /verifications</strong> for history</li>
+        <li>└ Records <strong>POST …/decision</strong> for underwriter verdict</li>
+        <li><strong>Adapter</strong> translates frozen backend contract → rich UI model</li>
+        <li>└ Risk score → Trust score (band-clamped)</li>
+        <li>└ Reasons → Signals with family/severity tags</li>
+        <li>└ Decision → Verdict (genuine | review | high_risk)</li>
+        <li><strong>Components</strong>: FileDropzone, DocumentCard, DocumentViewer, ScoreGauge, VerdictPill, SignalCard, BeforeAfterPanel, FieldsTable, SeverityBadge</li>
+      </ul></div>
+    </div>
+
+    <!-- ── 2. BACKEND ── -->
+    <div class="branch">
+      <div class="branch-header">
+        <span class="dot" style="background:var(--backend)"></span>
+        Backend — FastAPI + SQLite
+      </div>
+      <div class="branch-body"><ul>
+        <li><strong>main.py</strong>: App entry, CORS middleware, route mounting, DB init</li>
+        <li><strong>Routes</strong></li>
+        <li>└ <strong>POST /verify</strong> <em class="tag-api">frozen contract</em>
+          — single-document verification (synchronous). Returns risk_score, route_taken, decision, reasons, blockchain_tx, field_verification</li>
+        <li>└ <strong>POST /verify/batch</strong> — submits n documents, returns job_id, background thread processes concurrently</li>
+        <li>└ <strong>GET /verify/batch/{job_id}</strong> — poll until done (cache-control: no-store)</li>
+        <li>└ <strong>POST /verify/batch/{job_id}/decision</strong> — underwriter's Approve/Review/Reject recorded to audit log</li>
+        <li>└ <strong>GET /verifications</strong> — persistent history list (survives restart)</li>
+        <li>└ <strong>DELETE /verifications/{job_id}</strong> — soft delete (audit log preserved)</li>
+        <li><strong>process_document()</strong>: orchestrates P1 forensics → P2 verification → fusion → result</li>
+        <li><strong>_decide()</strong>: auth score ≥80 → route_1/auto_approve, 60-79 → route_2/human_review, &lt;60 → route_3/auto_reject</li>
+        <li><strong>jobs.py</strong>: In-memory async job store (dict + lock)</li>
+        <li><strong>store.py</strong>: SQLite persistence for verifications + blockchain_log migration, soft-delete</li>
+        <li><strong>Cross-document batch</strong>: ThreadPoolExecutor runs concurrent per-document pipes → discrepancy.py → overall verdict (weakest-link + escalation)</li>
+      </ul></div>
+    </div>
+
+    <!-- ── 3. PIPELINE 1 ── -->
+    <div class="branch">
+      <div class="branch-header">
+        <span class="dot" style="background:var(--pipeline1)"></span>
+        Pipeline 1 — Authenticity &amp; Forensics
+      </div>
+      <div class="branch-body"><ul>
+        <li><strong>Classifier</strong> (classifier.py)
+          <em class="tag-p1">routing</em></li>
+        <li>└ PDF header inspection (pikepdf + PyMuPDF)</li>
+        <li>└ Routes to: signed_pdf, born_digital_pdf, scanned_image</li>
+        <li>└ Vector text ratio estimation (5-page sampling)</li>
+        <li><strong>Tier 0 — Provenance</strong>
+          <em class="tag-tier">strongest signal</em></li>
+        <li>└ PKCS#7 offline signature verification (signature.py)
+          — cryptographic integrity, trust chain, post-sign modification detection</li>
+        <li>└ QR-code payload decoding + local registry lookup (qr.py, mock_registry.py)</li>
+        <li>└ SHA-256 hash → known-fake / known-genuine registry</li>
+        <li><strong>Tier 1 — Structure & Typography</strong>
+          <em class="tag-tier">high precision</em></li>
+        <li>└ PDF metadata diffs (Creator/Producer, CreationDate vs ModDate, XMP history)</li>
+        <li>└ Incremental-update revision recovery
+          <em class="tag-risk">KILLER SIGNAL</em> — reconstructs prior PDF revision, diffs original → edited values</li>
+        <li>└ Font family mismatch detection (per-span font vs document dominant)</li>
+        <li>└ Visual typography outliers (stroke density, baseline misalignment) via OCR word boxes</li>
+        <li>└ EXIF metadata for photos (suspicious software tags)</li>
+        <li><strong>Tier 2 — Pixel Forensics</strong>
+          <em class="tag-tier">advisory only</em></li>
+        <li>└ ELA (Error-Level Analysis) blockmap</li>
+        <li>└ DCT anomaly detection</li>
+        <li>└ Noise-residual analysis</li>
+        <li>└ Copy-move detection (forged stamps/signatures)</li>
+        <li>└ Multi-signal fusion: ≥2 signals overlap → high; single → low</li>
+        <li>└ Watermark suppression (portal/disclaimer overlays filtered)</li>
+        <li><em class="tag-risk">IMPORTANT:</em> Tier 2 is <strong>ADVISORY</strong> on government e-records — repeated text/table-grids/seals false-positive CSA/DCT/ELA heavily. Never drives verdict alone.</li>
+        <li><strong>Tier 3 — Domain & Integrity</strong> (tamper_map/spectral.py)</li>
+        <li><strong>Schema</strong> (schema.py): ClassificationResult, TierResult, SignatureResult, PixelForensicsResult, RevisionChange, SuspectRegion…</li>
+      </ul></div>
+    </div>
+
+    <!-- ── 4. PIPELINE 2 ── -->
+    <div class="branch">
+      <div class="branch-header">
+        <span class="dot" style="background:var(--pipeline2)"></span>
+        Pipeline 2 — Content Extraction &amp; Verification
+      </div>
+      <div class="branch-body"><ul>
+        <li><strong>extract.py</strong> — dual-pass VLM extraction
+          <ul>
+            <li><strong>Pass 1:</strong> vision call → full OCR + regional-script → English translation + classification (preserves entire document)</li>
+            <li><strong>Pass 2:</strong> text call → derive schema-declared fields from English full_text (cheaper, judging the same content)</li>
+          </ul>
+        </li>
+        <li><strong>verify.py</strong> — SEPARATE LLM session, fresh context, judges on data alone
+          <ul>
+            <li>Compares extracted field set vs DB-of-record <em>semantically</em>, not string-equal</li>
+            <li>Handles transliteration variance, co-owners, name-order, father-name suffixes, S/o variants</li>
+            <li>Outputs: match_status (match | partial_match | mismatch), per-field results, discrepancies</li>
+          </ul>
+        </li>
+        <li><strong>validators.py</strong> — deterministic (NOT LLM) high-confidence checks
+          <ul>
+            <li>PAN structure (AAAAA9999A regex) + 4th-char holder type (P/C/H/F/A/T…) + <strong>5th-char surname-initial cross-check</strong></li>
+            <li>Aadhaar: full Verhoeff D5 dihedral checksum</li>
+            <li>GSTIN: mod-36 checksum, state-code validity, embedded-PAN match vs applicant</li>
+            <li>Payslip arithmetic: gross - deductions = net (absolute+relative tolerance)</li>
+            <li>Failures from DEFINITIVE checks override match_status→"mismatch"</li>
+          </ul>
+        </li>
+        <li><strong>db.py</strong> — mocked authoritative record
+          <ul>
+            <li>fetch_record(db_collection, key_fields, extracted_fields)</li>
+            <li>Land-record tolerant lookup: parcel_id (exact) → survey_number bases (fuzzy) + locality/owner overlap</li>
+            <li>ITR records: composite key (PAN|assessment_year)</li>
+            <li>Returns: {found, source, record, as_of}</li>
+          </ul>
+        </li>
+        <li><strong>discrepancy.py</strong> — cross-document fraud detection
+          <ul>
+            <li>LLM identifies attributes across documents (PAN, incomes, employer, address…)</li>
+            <li><strong>Deterministic</strong> cross-checks: PAN agreement, GSTIN→PAN embedding match</li>
+            <li>Output: per-attribute severity + detail + document list</li>
+          </ul>
+        </li>
+        <li><strong>schemas.py</strong>: 30+ document schemas (ITR, payslip, land_record, PAN, Aadhaar, Form-16, bank_statement, sale_agreement, property-tax, OC, GST return, Udyam…)</li>
+        <li><strong>config.py</strong>: Environment-driven model config (provider, model-name, URL, key, temperature)</li>
+        <li><strong>llm_client.py</strong>: LiteLLM wrapper, multimodal base64 encoding, robust JSON repair for truncated responses</li>
+      </ul></div>
+    </div>
+
+    <!-- ── 5. FUSION ── -->
+    <div class="branch">
+      <div class="branch-header">
+        <span class="dot" style="background:var(--fusion)"></span>
+        Fusion Layer — Holistic Risk Assessment
+      </div>
+      <div class="branch-body"><ul>
+        <li><strong>fusion.py</strong>
+          <ul>
+            <li>LLM merges: P2 verification report + P1 forensics report + cross-document + flag history</li>
+            <li>Produces <strong>overall risk score (0-100)</strong> + risk band (low/medium/high) + decision recommendation (approve/manual_review/decline)</li>
+            <li>Top flags WITH their source (pipeline-tag) + weight</li>
+          </ul>
+        </li>
+        <li><strong>Cross-pipeline corroboration is the core value-add</strong>:
+          <ul>
+            <li>P1 tamper localization on field <strong>X</strong> + P2 data mismatch on same field = strongly reinforced</li>
+            <li>Lone forensic pixel signal + content match → capped at manual_review</li>
+          </ul>
+        </li>
+        <li><strong>False-positive control rules</strong> (baked in system prompt):
+          <ul>
+            <li>Content VERIFIED unique-ID match → pixel anomaly is low confidence</li>
+            <li>Deterministic checks = hard evidence, raised sharply</li>
+            <li>Informational portal watermarks = normal, never flagged</li>
+            <li>Field-weighted: identity/money fields → high; construction → medium; cosmetic → low</li>
+          </ul>
+        </li>
+        <li><strong>Fallback fusion</strong>: when the LLM response can't be parsed, the verb derives the bar from content match_status alone</li>
+        <li><strong>Flag-history feedback loop</strong>: past false-flag down-weight (bidirectional, planned)</li>
+      </ul></div>
+    </div>
+
+    <!-- ── 6. DATA ── -->
+    <div class="branch">
+      <div class="branch-header">
+        <span class="dot" style="background:var(--data)"></span>
+        Data Layer — SQLite (verichain.db)
+      </div>
+      <div class="branch-body"><ul>
+        <li><strong>applicants</strong> — demo applicants (APP001–APP005; name, scenario, expected score/decision)</li>
+        <li><strong>documents</strong> — mock documents (doc_type, fields_json, fields_hash, digilocker_uri, ulpin)</li>
+        <li><strong>itr_records</strong> — authoritative ITR database (record_key, PAN, name, AY, gross_total_income, total_tax_paid)</li>
+        <li><strong>land_records</strong> — authoritative land-records database (state, district, taluka, village, survey_number, owner_name, area_hectare, parcel_id, encumbrance)</li>
+        <li><strong>blockchain_log</strong> — immutable audit trail
+          <ul>
+            <li>Columns: applicant_id, doc_hash, risk_score, decision, timestamp, tx_hash, event_type</li>
+            <li>event_type: "system_verdict" or "underwriter_decision"</li>
+            <li>Append-only, never rewritten — only the verifications table is soft-deleted</li>
+          </ul>
+        </li>
+        <li><strong>verifications</strong> — persistent job results
+          <ul>
+            <li>job_id, applicant_id, submitted_at, doc_names, document_count, decision, risk_score, result_json, deleted flag</li>
+            <li>Survives restarts — results page reopens via GET fallback</li>
+          </ul>
+        </li>
+        <li><strong>load_authoritative.py</strong> — loads mock authoritative land + ITR records into DB</li>
+        <li><strong>seed.py</strong> — seeds demo test cases</li>
+        <li><strong>init_db.py</strong> — creates all tables</li>
+      </ul></div>
+    </div>
+
+    <!-- ── 7. INFRA & TEST ── -->
+    <div class="branch">
+      <div class="branch-header">
+        <span class="dot" style="background:#ec4899"></span>
+        Infrastructure & Demos
+      </div>
+      <div class="branch-body"><ul>
+        <li><strong>Blockchain (audit log, not integrity oracle)</strong>
+          <ul>
+            <li>Mock tx_hash: SHA-256(applicant_id + doc_hash + risk_score) truncated to 40 hex chars</li>
+            <li>Logged alongside every system verdict + underwriter decision</li>
+            <li>Append-only blockchain_log table = "immutable audit trail"</li>
+            <li>Ganache/dev chain available; not required for prototype</li>
+          </ul>
+        </li>
+        <li><strong>mock_data/documents/</strong> — test documents: genuine, tampered, vernacular (Marathi 7/12), AI-generated, cross-doc</li>
+        <li><strong>LLM Client (LiteLLM)</strong>: Multi-provider, env-driven (OPENAI_API_KEY, LLM_MODEL etc.)</li>
+        <li><strong>Config</strong>: .env for secrets, .env.example as template</li>
+      </ul></div>
+    </div>
+
+    <!-- ── 8. FLOW SUMMARY ── -->
+    <div class="flow">
+      <h2>🔄 End-to-End Data Flow</h2>
+      <div class="flow-diagram" style="line-height:2.2">
+        <span class="flow-node" style="background:rgba(239,68,68,0.12);color:var(--risk-high)">User uploads PDF/JPG</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-node" style="background:rgba(59,130,246,0.12);color:var(--backend)">POST /verify/batch</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-node" style="background:rgba(20,184,166,0.12);color:var(--pipeline1)">P1: Classify → T0 (sig/QR) → T1 (metadata/fonts/revision) → T2 (ELA/DCT/noise/copy-move)</span>
+        <span class="flow-arrow">||</span>
+        <span class="flow-node" style="background:rgba(139,92,246,0.12);color:var(--pipeline2)">P2: VLM Extract(2-pass) → Validators(IDS) → DB Fetch → Verify(she LLM)</span>
+        <span class="flow-arrow">↘</span>
+        <span class="flow-node" style="background:rgba(245,158,11,0.12);color:var(--fusion)">Fusion LLM</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-node" style="background:rgba(249,115,22,0.12);color:var(--frontend)">Results Dashboard</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-node" style="background:rgba(34,197,94,0.12);color:var(--data)">Underwriter decision → Audit Log</span>
+      </div>
+      <div style="margin-top:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;font-size:0.8rem">
+        <div style="background:rgba(239,68,68,0.08);padding:10px;border-radius:8px">
+          <strong style="color:var(--risk-high)">Killer Signal</strong><br>
+          <span style="color:var(--muted)">Recovered prior PDF revision value → field-dependent Pipeline-2 anomaly → double-intent, 2-pipeline confirmation = highest-weight flag</span></div>
+        <div style="background:rgba(20,184,166,0.08);padding:10px;border-radius:8px">
+          <strong style="color:var(--pipeline1)">P1 Deliberates</strong><br>
+          <span style="color:var(--muted)">Tier 0 (provenance) + Tier 1 (structure) = hard; Tier 2 = advisory (unreliable on typed e-records)</span></div>
+        <div style="background:rgba(139,92,246,0.08);padding:10px;border-radius:8px">
+          <strong style="color:var(--pipeline2)">P2 Hard Checks</strong><br>
+          <span style="color:var(--muted)">PAN 5th-char vs name, Aadhaar Verhoeff, GSTIN checksum+state+PAN, transaction reconciliation — ALL deterministic, no LLM</span></div>
+        <div style="background:rgba(245,158,11,0.08);padding:10px;border-radius:8px">
+          <strong style="color:var(--fusion)">Fusion</strong><br>
+          <span style="color:var(--muted)">Input: P1 + P2 + cross-doc + flag-history → risk_score 0-100 (0=clean, 100=fraud) → authenticity inversion → decide</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:2rem;font-size:0.72rem">
+  VeriChain Architecture · Working on feature/frontend · July 2026 · Decision Support for Human Underwriters, Not Auto-Decisioning
+</p>
+</body>
+</html>

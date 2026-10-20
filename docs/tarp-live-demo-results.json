@@ -1,0 +1,541 @@
+{
+  "tested_at": "2026-10-08",
+  "model": "gemini/gemini-3.1-flash-lite",
+  "data": "invented synthetic PDFs only",
+  "cases": [
+    {
+      "scenario": "clean",
+      "elapsed_seconds": 93,
+      "expected": [
+        "ITR and land match invented references",
+        "Net salary matches bank credit",
+        "Payslip and bank remain unverified without issuer records"
+      ],
+      "observed_decision": "human_review",
+      "observed_authenticity": 75,
+      "analysis_status": "complete",
+      "warnings": [],
+      "reconciliation": [
+        {
+          "id": "salary_0_2",
+          "check_code": "salary_bank_credit",
+          "document_ids": [
+            "doc_0",
+            "doc_2"
+          ],
+          "label": "Payslip \u2192 bank salary credit",
+          "status": "matched",
+          "severity": "info",
+          "expected": "70000",
+          "observed": "70000",
+          "difference": "0",
+          "detail": "Payslip net \u20b970,000.00; identified salary credit \u20b970,000.00; difference \u20b90.00.",
+          "date": "2025-03-31",
+          "page": 1,
+          "transaction_id": "txn_2",
+          "bank_document_id": "doc_2"
+        }
+      ],
+      "documents": [
+        {
+          "type": "payslip",
+          "content_status": "unverified",
+          "checks": [
+            {
+              "check": "pan_structure",
+              "field": "pan",
+              "document_value": "TARPD4321E",
+              "expected": "AAAAA9999A",
+              "passed": true,
+              "severity": "info",
+              "detail": "PAN matches the AAAAA9999A pattern.",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "pan_holder_type",
+              "field": "pan",
+              "document_value": "P",
+              "expected": "one of ABCFGHJLPT",
+              "passed": true,
+              "severity": "info",
+              "detail": "4th char 'P' = Individual.",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "pan_surname_initial",
+              "field": "pan",
+              "document_value": "D",
+              "expected": "D",
+              "passed": true,
+              "severity": "info",
+              "detail": "5th char 'D' matches the surname initial ('Demo').",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "payslip_arithmetic",
+              "field": "net_pay",
+              "document_value": 70000.0,
+              "expected": 70000.0,
+              "passed": true,
+              "severity": "info",
+              "detail": "Net pay (70000) matches gross (80000) minus deductions (10000).",
+              "source": "deterministic_validator"
+            }
+          ],
+          "recovered_changes": []
+        },
+        {
+          "type": "salaried_itr",
+          "content_status": "match",
+          "checks": [
+            {
+              "check": "pan_structure",
+              "field": "pan",
+              "document_value": "TARPD4321E",
+              "expected": "AAAAA9999A",
+              "passed": true,
+              "severity": "info",
+              "detail": "PAN matches the AAAAA9999A pattern.",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "pan_holder_type",
+              "field": "pan",
+              "document_value": "P",
+              "expected": "one of ABCFGHJLPT",
+              "passed": true,
+              "severity": "info",
+              "detail": "4th char 'P' = Individual.",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "pan_surname_initial",
+              "field": "pan",
+              "document_value": "D",
+              "expected": "D",
+              "passed": true,
+              "severity": "info",
+              "detail": "5th char 'D' matches the surname initial ('Demo').",
+              "source": "deterministic_validator"
+            }
+          ],
+          "recovered_changes": []
+        },
+        {
+          "type": "bank_statement",
+          "content_status": "unverified",
+          "checks": [
+            {
+              "check": "pan_structure",
+              "field": "pan",
+              "document_value": "TARPD4321E",
+              "expected": "AAAAA9999A",
+              "passed": true,
+              "severity": "info",
+              "detail": "PAN matches the AAAAA9999A pattern.",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "pan_holder_type",
+              "field": "pan",
+              "document_value": "P",
+              "expected": "one of ABCFGHJLPT",
+              "passed": true,
+              "severity": "info",
+              "detail": "4th char 'P' = Individual.",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "pan_surname_initial",
+              "field": "pan",
+              "document_value": "D",
+              "expected": "D",
+              "passed": true,
+              "severity": "info",
+              "detail": "5th char 'D' matches the surname initial ('Demo').",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "statement_running_balance",
+              "field": "transactions",
+              "passed": true,
+              "severity": "info",
+              "detail": "Row 1: stated balance \u20b98,000.00; calculated \u20b98,000.00.",
+              "document_value": "8000",
+              "expected": "8000",
+              "source": "deterministic_validator",
+              "page": 1,
+              "transaction_id": "txn_1"
+            },
+            {
+              "check": "statement_running_balance",
+              "field": "transactions",
+              "passed": true,
+              "severity": "info",
+              "detail": "Row 2: stated balance \u20b978,000.00; calculated \u20b978,000.00.",
+              "document_value": "78000",
+              "expected": "78000",
+              "source": "deterministic_validator",
+              "page": 1,
+              "transaction_id": "txn_2"
+            },
+            {
+              "check": "statement_totals",
+              "field": "transactions",
+              "passed": true,
+              "severity": "info",
+              "detail": "Closing balance \u20b978,000.00; opening plus net transactions \u20b978,000.00.",
+              "document_value": "78000",
+              "expected": "78000",
+              "source": "deterministic_validator"
+            }
+          ],
+          "recovered_changes": []
+        },
+        {
+          "type": "land_record",
+          "content_status": "match",
+          "checks": [],
+          "recovered_changes": []
+        }
+      ]
+    },
+    {
+      "scenario": "salary_edit",
+      "elapsed_seconds": 16,
+      "expected": [
+        "Recover gross pay 80000 -> 200000",
+        "Payslip arithmetic fails",
+        "Reject recommendation"
+      ],
+      "observed_decision": "auto_reject",
+      "observed_authenticity": 5,
+      "analysis_status": "complete",
+      "warnings": [],
+      "reconciliation": [],
+      "documents": [
+        {
+          "type": "payslip",
+          "content_status": "mismatch",
+          "checks": [
+            {
+              "check": "pan_structure",
+              "field": "pan",
+              "document_value": "TARPD4321E",
+              "expected": "AAAAA9999A",
+              "passed": true,
+              "severity": "info",
+              "detail": "PAN matches the AAAAA9999A pattern.",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "pan_holder_type",
+              "field": "pan",
+              "document_value": "P",
+              "expected": "one of ABCFGHJLPT",
+              "passed": true,
+              "severity": "info",
+              "detail": "4th char 'P' = Individual.",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "pan_surname_initial",
+              "field": "pan",
+              "document_value": "D",
+              "expected": "D",
+              "passed": true,
+              "severity": "info",
+              "detail": "5th char 'D' matches the surname initial ('Demo').",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "payslip_arithmetic",
+              "field": "net_pay",
+              "document_value": 70000.0,
+              "expected": 190000.0,
+              "passed": false,
+              "severity": "high",
+              "detail": "Arithmetic tamper: gross pay (200000) minus deductions (10000) = 190000, but the document states net pay as 70000 \u2014 a discrepancy of 120000.",
+              "source": "deterministic_validator"
+            }
+          ],
+          "recovered_changes": [
+            {
+              "field_hint": "Gross Pay",
+              "original_value": "80000",
+              "current_value": "200000",
+              "kind": "identifier",
+              "weight": "high",
+              "page_number": 1,
+              "bbox": [
+                102.46399688720703,
+                248.46400451660156,
+                139.1599884033203,
+                263.5780029296875
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "itr_edit",
+      "elapsed_seconds": 19,
+      "expected": [
+        "Income 2400000 differs from reference 960000",
+        "Reject recommendation"
+      ],
+      "observed_decision": "auto_reject",
+      "observed_authenticity": 15,
+      "analysis_status": "complete",
+      "warnings": [],
+      "reconciliation": [],
+      "documents": [
+        {
+          "type": "salaried_itr",
+          "content_status": "partial_match",
+          "checks": [
+            {
+              "check": "pan_structure",
+              "field": "pan",
+              "document_value": "TARPD4321E",
+              "expected": "AAAAA9999A",
+              "passed": true,
+              "severity": "info",
+              "detail": "PAN matches the AAAAA9999A pattern.",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "pan_holder_type",
+              "field": "pan",
+              "document_value": "P",
+              "expected": "one of ABCFGHJLPT",
+              "passed": true,
+              "severity": "info",
+              "detail": "4th char 'P' = Individual.",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "pan_surname_initial",
+              "field": "pan",
+              "document_value": "D",
+              "expected": "D",
+              "passed": true,
+              "severity": "info",
+              "detail": "5th char 'D' matches the surname initial ('Demo').",
+              "source": "deterministic_validator"
+            }
+          ],
+          "recovered_changes": []
+        }
+      ]
+    },
+    {
+      "scenario": "bank_balance",
+      "elapsed_seconds": 11,
+      "expected": [
+        "Salary credit fails running balance arithmetic",
+        "Reject recommendation"
+      ],
+      "observed_decision": "auto_reject",
+      "observed_authenticity": 5,
+      "analysis_status": "complete",
+      "warnings": [],
+      "reconciliation": [],
+      "documents": [
+        {
+          "type": "bank_statement",
+          "content_status": "mismatch",
+          "checks": [
+            {
+              "check": "pan_structure",
+              "field": "pan",
+              "document_value": "TARPD4321E",
+              "expected": "AAAAA9999A",
+              "passed": true,
+              "severity": "info",
+              "detail": "PAN matches the AAAAA9999A pattern.",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "pan_holder_type",
+              "field": "pan",
+              "document_value": "P",
+              "expected": "one of ABCFGHJLPT",
+              "passed": true,
+              "severity": "info",
+              "detail": "4th char 'P' = Individual.",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "pan_surname_initial",
+              "field": "pan",
+              "document_value": "D",
+              "expected": "D",
+              "passed": true,
+              "severity": "info",
+              "detail": "5th char 'D' matches the surname initial ('Demo').",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "statement_running_balance",
+              "field": "transactions",
+              "passed": true,
+              "severity": "info",
+              "detail": "Row 1: stated balance \u20b98,000.00; calculated \u20b98,000.00.",
+              "document_value": "8000",
+              "expected": "8000",
+              "source": "deterministic_validator",
+              "page": 1,
+              "transaction_id": "txn_1"
+            },
+            {
+              "check": "statement_running_balance",
+              "field": "transactions",
+              "passed": false,
+              "severity": "high",
+              "detail": "Row 2: stated balance \u20b9178,000.00; calculated \u20b978,000.00.",
+              "document_value": "178000",
+              "expected": "78000",
+              "source": "deterministic_validator",
+              "page": 1,
+              "transaction_id": "txn_2"
+            },
+            {
+              "check": "statement_totals",
+              "field": "transactions",
+              "passed": false,
+              "severity": "high",
+              "detail": "Closing balance \u20b9178,000.00; opening plus net transactions \u20b978,000.00.",
+              "document_value": "178000",
+              "expected": "78000",
+              "source": "deterministic_validator"
+            }
+          ],
+          "recovered_changes": []
+        }
+      ]
+    },
+    {
+      "scenario": "land_area",
+      "elapsed_seconds": 17,
+      "expected": [
+        "Holding 12.5 hectares differs from reference 2.5",
+        "Reject recommendation"
+      ],
+      "observed_decision": "auto_reject",
+      "observed_authenticity": 15,
+      "analysis_status": "complete",
+      "warnings": [],
+      "reconciliation": [],
+      "documents": [
+        {
+          "type": "land_record",
+          "content_status": "mismatch",
+          "checks": [],
+          "recovered_changes": []
+        }
+      ]
+    },
+    {
+      "scenario": "pan_conflict",
+      "elapsed_seconds": 30,
+      "expected": [
+        "Two structurally valid PANs disagree",
+        "Cross-document identity conflict",
+        "Reject recommendation"
+      ],
+      "observed_decision": "auto_reject",
+      "observed_authenticity": 40,
+      "analysis_status": "complete",
+      "warnings": [],
+      "reconciliation": [],
+      "documents": [
+        {
+          "type": "salaried_itr",
+          "content_status": "match",
+          "checks": [
+            {
+              "check": "pan_structure",
+              "field": "pan",
+              "document_value": "TARPD4321E",
+              "expected": "AAAAA9999A",
+              "passed": true,
+              "severity": "info",
+              "detail": "PAN matches the AAAAA9999A pattern.",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "pan_holder_type",
+              "field": "pan",
+              "document_value": "P",
+              "expected": "one of ABCFGHJLPT",
+              "passed": true,
+              "severity": "info",
+              "detail": "4th char 'P' = Individual.",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "pan_surname_initial",
+              "field": "pan",
+              "document_value": "D",
+              "expected": "D",
+              "passed": true,
+              "severity": "info",
+              "detail": "5th char 'D' matches the surname initial ('Demo').",
+              "source": "deterministic_validator"
+            }
+          ],
+          "recovered_changes": []
+        },
+        {
+          "type": "payslip",
+          "content_status": "unverified",
+          "checks": [
+            {
+              "check": "pan_structure",
+              "field": "pan",
+              "document_value": "QWEPD9876A",
+              "expected": "AAAAA9999A",
+              "passed": true,
+              "severity": "info",
+              "detail": "PAN matches the AAAAA9999A pattern.",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "pan_holder_type",
+              "field": "pan",
+              "document_value": "P",
+              "expected": "one of ABCFGHJLPT",
+              "passed": true,
+              "severity": "info",
+              "detail": "4th char 'P' = Individual.",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "pan_surname_initial",
+              "field": "pan",
+              "document_value": "D",
+              "expected": "D",
+              "passed": true,
+              "severity": "info",
+              "detail": "5th char 'D' matches the surname initial ('Demo').",
+              "source": "deterministic_validator"
+            },
+            {
+              "check": "payslip_arithmetic",
+              "field": "net_pay",
+              "document_value": 70000.0,
+              "expected": 70000.0,
+              "passed": true,
+              "severity": "info",
+              "detail": "Net pay (70000) matches gross (80000) minus deductions (10000).",
+              "source": "deterministic_validator"
+            }
+          ],
+          "recovered_changes": []
+        }
+      ]
+    }
+  ]
+}

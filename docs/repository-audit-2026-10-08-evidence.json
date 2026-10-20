@@ -1,0 +1,327 @@
+{
+  "date": "2026-10-08",
+  "configured_model": "gemini/gemini-3.1-flash-lite",
+  "python": "3.12.3",
+  "pytest": {
+    "passed": 27,
+    "seconds": 0.8
+  },
+  "frontend_build": "passed",
+  "live_model_inputs": "newly generated synthetic documents and fresh synthetic database only",
+  "live": {
+    "clean_itr.pdf": {
+      "http_status": 200,
+      "elapsed": 11.6,
+      "response": {
+        "risk_score": 100,
+        "route_taken": "route_1",
+        "decision": "auto_approve",
+        "reasons": [
+          "The ITR document successfully matched the authoritative database record with no discrepancies or deterministic check failures. Forensic analysis confirms the document is authentic with no signs of tampering or structural anomalies."
+        ],
+        "blockchain_tx": "0x08da772eac99d126269517dbca515422a9b8a60f",
+        "heatmap_url": null,
+        "field_verification": {
+          "status": "verified",
+          "issuer": "CBDT",
+          "matched_fields": [
+            "pan",
+            "name",
+            "assessment_year",
+            "gross_total_income",
+            "total_tax_paid",
+            "employer_name",
+            "acknowledgement_number"
+          ]
+        }
+      }
+    },
+    "altered_salary.pdf": {
+      "http_status": 200,
+      "elapsed": 7.26,
+      "response": {
+        "risk_score": 5,
+        "route_taken": "route_3",
+        "decision": "auto_reject",
+        "reasons": [
+          "Edited PDF field recovered \u2014 Gross Pay \u2014 original: 80,000 \u2192 edited: 200000",
+          "Payslip arithmetic failure: gross pay (200,000) minus deductions (10,000) does not equal net pay (70,000).",
+          "Incremental PDF revision recovery confirms Gross Pay was manually edited from 80,000 to 200,000."
+        ],
+        "blockchain_tx": "0x790d168f68de338937e43200eb407c440ef50614",
+        "heatmap_url": "/artifacts/single/479e7ebfb3911515_p1.png",
+        "field_verification": {
+          "status": "mismatch",
+          "issuer": "Internal Registry",
+          "matched_fields": []
+        }
+      }
+    },
+    "land.png": {
+      "http_status": 200,
+      "elapsed": 14.27,
+      "response": {
+        "risk_score": 85,
+        "route_taken": "route_1",
+        "decision": "auto_approve",
+        "reasons": [
+          "Pixel-level anomalies (copy-move/DCT) detected across the document."
+        ],
+        "blockchain_tx": "0x7d17d8d06a75b53b16cd8f517e40f1f3bca93bcb",
+        "heatmap_url": "/artifacts/single/679849e1974a2056_p0.png",
+        "field_verification": {
+          "status": "verified",
+          "issuer": "CERSAI",
+          "matched_fields": [
+            "parcel_id",
+            "owner_name",
+            "survey_number",
+            "area_hectare",
+            "encumbrance"
+          ]
+        }
+      }
+    },
+    "batch": {
+      "elapsed": 12.08,
+      "response": {
+        "job_id": "job_75c2ec26bee0",
+        "status": "done",
+        "progress": 100,
+        "applicant_id": "SYNTHETIC-CROSS",
+        "submitted_at": "2026-10-08T06:43:36.309658+00:00",
+        "document_count": 2,
+        "documents": [
+          {
+            "filename": "altered_itr.pdf",
+            "document_type": "itr",
+            "risk_score": 15,
+            "route_taken": "route_3",
+            "decision": "auto_reject",
+            "reasons": [
+              "The gross total income reported in the ITR is significantly lower than the authoritative database record."
+            ],
+            "heatmap_url": null,
+            "field_verification": {
+              "status": "mismatch",
+              "issuer": "CBDT",
+              "matched_fields": [
+                "pan",
+                "name",
+                "assessment_year",
+                "total_tax_paid",
+                "employer_name",
+                "acknowledgement_number"
+              ]
+            },
+            "extracted_fields": {
+              "pan": "ABCPD1234E",
+              "name": "Arun Demo",
+              "assessment_year": "2025-2026",
+              "gross_total_income": 370000,
+              "total_tax_paid": 50000,
+              "employer_name": "Example Test Company",
+              "acknowledgement_number": "123456789012345"
+            }
+          },
+          {
+            "filename": "salary.pdf",
+            "document_type": "salary_slip",
+            "risk_score": 75,
+            "route_taken": "route_2",
+            "decision": "human_review",
+            "reasons": [
+              "Payslip status is unverified as no authoritative database record exists for this document type."
+            ],
+            "heatmap_url": null,
+            "field_verification": {
+              "status": "unverifiable",
+              "issuer": "Internal Registry",
+              "matched_fields": []
+            },
+            "extracted_fields": {
+              "employee_name": "Arun Demo",
+              "employee_id": null,
+              "employer_name": "Example Test Company",
+              "pay_period": "March 2025",
+              "gross_pay": 80000,
+              "net_pay": 70000,
+              "deductions": 10000,
+              "bank_account_last4": null
+            }
+          }
+        ],
+        "cross_document": [
+          {
+            "label": "income (annualized) differs across documents",
+            "reason": "Annualized salary-slip income differs from the ITR's annual gross by 61% \u2014 income is understated on at least one document (a classic loan-file fraud signal). (values: ITR gross 370,000/yr vs salary slip 960,000/yr (monthly x12))",
+            "severity": "high"
+          },
+          {
+            "label": "income differs across documents",
+            "reason": "The annualized payslip income (960,000) is significantly higher than the ITR gross income (370,000), exceeding the 15% threshold and indicating a potential income understatement. (values: 370000 (Annual) vs 960000 (Annualized))",
+            "severity": "high"
+          }
+        ],
+        "overall": {
+          "risk_score": 15,
+          "route_taken": "route_3",
+          "decision": "auto_reject",
+          "reasons": [
+            "income (annualized) differs across documents: Annualized salary-slip income differs from the ITR's annual gross by 61% \u2014 income is understated on at least one document (a classic loan-file fraud signal). (values: ITR gross 370,000/yr vs salary slip 960,000/yr (monthly x12))",
+            "income differs across documents: The annualized payslip income (960,000) is significantly higher than the ITR gross income (370,000), exceeding the 15% threshold and indicating a potential income understatement. (values: 370000 (Annual) vs 960000 (Annualized))",
+            "The gross total income reported in the ITR is significantly lower than the authoritative database record."
+          ]
+        },
+        "underwriter_decision": null,
+        "error": null
+      }
+    },
+    "persistence": {
+      "reopen_status": 200,
+      "same_overall": true,
+      "report_status": 200,
+      "decision_status": 200,
+      "history_count": 3
+    }
+  },
+  "synthetic_edge_checks": {
+    "qr": [
+      {
+        "payload": "VERICHAIN-SYNTHETIC-QR-TEST",
+        "page_number": 0,
+        "decoded_via_fallback": true
+      }
+    ],
+    "second_page_overlay": {
+      "recovered_pages": [
+        1
+      ],
+      "rendered_heatmap_pages": [
+        1,
+        2
+      ],
+      "high_regions": [
+        {
+          "page": 1,
+          "bbox_pct": {
+            "x": 65.04,
+            "y": 10.63,
+            "w": 6.13,
+            "h": 1.78
+          },
+          "confidence": "high",
+          "signals": [
+            "revision_edit"
+          ],
+          "note": "Recovered revision edit \u2014 to classify. Gross Pay: 80,000 \u2192 200000"
+        },
+        {
+          "page": 2,
+          "bbox_pct": {
+            "x": 65.04,
+            "y": 10.63,
+            "w": 6.13,
+            "h": 1.78
+          },
+          "confidence": "high",
+          "signals": [
+            "revision_edit"
+          ],
+          "note": "Recovered revision edit \u2014 to classify. Gross Pay: 80,000 \u2192 200000"
+        }
+      ]
+    },
+    "benign_resave": {
+      "incremental_update_detected": true,
+      "revisions_found": 2,
+      "prior_revision_recovered": false,
+      "recovered_changes": [],
+      "original_render_path": null,
+      "current_render_path": null,
+      "summary": "PDF was incrementally re-saved, but no text change was recovered between revisions (likely a benign re-save).",
+      "warnings": []
+    },
+    "signature_detection": {
+      "classification": {
+        "document_type": "signed_pdf",
+        "page_count": 1,
+        "has_embedded_signature": true,
+        "vector_text_ratio": 0.0,
+        "is_encrypted": false,
+        "warnings": []
+      },
+      "signature": {
+        "signature_present": true,
+        "cryptographic_integrity_valid": null,
+        "trust_chain_valid": null,
+        "modified_after_signing": true,
+        "signer_name": "Synthetic Test",
+        "signing_time": null,
+        "warnings": [
+          "PDF was modified after the last signature was applied",
+          "pyHanko unavailable; signature integrity not validated: No module named 'pyhanko'"
+        ],
+        "details": {
+          "signature_count": 1,
+          "signed_revision_length": 30,
+          "file_size": 802
+        }
+      }
+    },
+    "fusion_outage_ignores_tampering": {
+      "fusion": {
+        "overall_risk_score": 10,
+        "risk_band": "low",
+        "decision_recommendation": "approve",
+        "top_flags": [
+          {
+            "source": "verification",
+            "evidence": "All checked fields match the authoritative DB record.",
+            "weight": "medium"
+          }
+        ],
+        "corroborated_findings": [],
+        "false_flag_adjustments": [],
+        "rationale": "Fusion LLM output could not be parsed; verdict derived from the content verification match_status (match).",
+        "fallback": true
+      },
+      "api": {
+        "risk_score": 90,
+        "route_taken": "route_1",
+        "decision": "auto_approve",
+        "reasons": [
+          "All checked fields match the authoritative DB record."
+        ],
+        "heatmap_url": null,
+        "field_verification": {
+          "status": "verified",
+          "issuer": "CBDT",
+          "matched_fields": []
+        },
+        "extracted_fields": {}
+      }
+    },
+    "ocr_page_cap": {
+      "input_pages": 9,
+      "sent_pages": 8
+    }
+  },
+  "frontend_adapter_mapping": [
+    {
+      "backend": 100,
+      "decision": "auto_approve",
+      "ui": 95
+    },
+    {
+      "backend": 5,
+      "decision": "auto_reject",
+      "ui": 15
+    },
+    {
+      "backend": 75,
+      "decision": "human_review",
+      "ui": 69
+    }
+  ]
+}

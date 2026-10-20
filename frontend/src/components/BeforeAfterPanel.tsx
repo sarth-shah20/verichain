@@ -77,7 +77,7 @@ export function BeforeAfterPanel({ evidence }: { evidence: RevisionEvidence }) {
               </div>
               {c.page_number != null && (
                 <p className="mt-1.5 text-[11px] text-slate-400">
-                  Recovered from page {c.page_number + 1}
+                  Recovered from page {c.page_number}
                 </p>
               )}
             </li>

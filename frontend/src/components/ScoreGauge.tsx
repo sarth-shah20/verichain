@@ -57,7 +57,7 @@ export function ScoreGauge({
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span
-            className="tnum text-4xl font-extrabold leading-none"
+            className="tnum animate-score-in text-4xl font-extrabold leading-none"
             style={{ color }}
           >
             {clamped}

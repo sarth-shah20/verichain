@@ -21,6 +21,7 @@ from pipeline1.pixel_forensics.block_grid import (
 from pipeline1.pixel_forensics.copy_move import find_copy_move
 from pipeline1.pixel_forensics.dct_blockmap import run_dct_anomaly
 from pipeline1.pixel_forensics.ela import run_ela
+from pipeline1.pixel_forensics.jpeg_ghost import run_jpeg_ghost
 from pipeline1.pixel_forensics.noise_blockmap import run_noise_anomaly
 from pipeline1.schema import (
     ClassificationResult,
@@ -40,6 +41,10 @@ MIN_TOTAL_BLOCKS = 10
 ELA_MIN_ABS_DEV = 2.0
 DCT_MIN_ABS_DEV = 0.0
 NOISE_MIN_ABS_DEV = 1.0
+GHOST_MIN_ABS_DEV = 1.5
+# Above this watermark coverage the suppression mask is likely eating real
+# content (e.g. payslip background grids) — disable it and warn instead.
+WATERMARK_COVERAGE_GUARD = 0.30
 
 
 @dataclass
@@ -72,10 +77,12 @@ def run_tier2(
     ela_ran = False
     dct_ran = False
     noise_ran = False
+    ghost_ran = False
     copy_move_ran = False
     low_confidence = False
     watermark_detected = False
     watermark_coverage = 0.0
+    suppression_applied = bool(apply_watermark_suppression)
 
     try:
         page_images = get_page_images(path)
@@ -94,14 +101,23 @@ def run_tier2(
             watermark_mask = detect_overlay_mask(image, grid)
             watermark_detected = watermark_detected or watermark_mask.detected
             watermark_coverage = max(watermark_coverage, watermark_mask.coverage_fraction)
-            suppression_mask = watermark_mask if apply_watermark_suppression else None
+            # Guard: a huge "watermark" mask is usually a background grid, not a
+            # portal overlay — suppressing it would blind every pixel signal.
+            if watermark_mask.detected and watermark_mask.coverage_fraction > WATERMARK_COVERAGE_GUARD:
+                warnings.append(
+                    f"page {page_number}: watermark coverage "
+                    f"{watermark_mask.coverage_fraction:.0%} exceeds guard — "
+                    "suppression disabled for this page"
+                )
+                suppression_mask = None
+                suppression_applied = False
+            else:
+                suppression_mask = watermark_mask if apply_watermark_suppression else None
 
             copy_move_regions = _copy_move_regions(page_number, grid, suppression_mask)
+            copy_move_ran = True
             if copy_move_regions:
-                copy_move_ran = True
                 all_signal_regions.extend(copy_move_regions)
-            else:
-                copy_move_ran = True
 
             if len(grid.blocks) < MIN_TOTAL_BLOCKS:
                 warnings.append(f"page {page_number}: too few blocks for grid signals")
@@ -111,6 +127,7 @@ def run_tier2(
             ela_scores = np.asarray(run_ela(grid).get("block_scores", []), dtype=float)
             dct_scores = run_dct_anomaly(grid)
             noise_scores = run_noise_anomaly(grid)
+            ghost_scores = np.asarray(run_jpeg_ghost(grid), dtype=float)
             ela_flagged = _watermark_suppressed_outlier_mask(
                 ela_scores,
                 suppression_mask,
@@ -126,14 +143,21 @@ def run_tier2(
                 suppression_mask,
                 _noise_outlier_mask,
             )
+            ghost_flagged = _watermark_suppressed_outlier_mask(
+                ghost_scores,
+                suppression_mask,
+                lambda scores: robust_outlier_mask(scores, k=3.0, min_abs_dev=GHOST_MIN_ABS_DEV),
+            )
             ela_regions = _regions_from_flags(page_number, grid, ela_flagged, "ela")
             dct_regions = _regions_from_flags(page_number, grid, dct_flagged, "dct")
             noise_regions = _regions_from_flags(page_number, grid, noise_flagged, "noise")
+            ghost_regions = _regions_from_flags(page_number, grid, ghost_flagged, "jpeg_ghost")
             page_signal_regions = [
                 *copy_move_regions,
                 *ela_regions,
                 *dct_regions,
                 *noise_regions,
+                *ghost_regions,
             ]
             high_regions = [
                 region
@@ -154,9 +178,11 @@ def run_tier2(
             ela_ran = True
             dct_ran = True
             noise_ran = True
+            ghost_ran = True
             all_signal_regions.extend(ela_regions)
             all_signal_regions.extend(dct_regions)
             all_signal_regions.extend(noise_regions)
+            all_signal_regions.extend(ghost_regions)
     except Exception as exc:
         warnings.append(f"tier2 pixel forensics failed: {exc}")
         low_confidence = True
@@ -191,8 +217,10 @@ def run_tier2(
         dct_ran=dct_ran,
         noise_ran=noise_ran,
         copy_move_ran=copy_move_ran,
+        ghost_ran=ghost_ran,
         watermark_detected=watermark_detected,
         watermark_coverage=watermark_coverage,
+        watermark_suppression_applied=suppression_applied,
         suspect_regions=suspect_regions,
         low_confidence=low_confidence,
         warnings=warnings,
@@ -222,6 +250,12 @@ def _noise_regions(page_number: int, grid: BlockGrid) -> list[_SignalRegion]:
     scores = run_noise_anomaly(grid)
     flagged = _noise_outlier_mask(scores)
     return _regions_from_flags(page_number, grid, flagged, "noise")
+
+
+def _ghost_regions(page_number: int, grid: BlockGrid) -> list[_SignalRegion]:
+    scores = np.asarray(run_jpeg_ghost(grid), dtype=float)
+    flagged = robust_outlier_mask(scores, k=3.0, min_abs_dev=GHOST_MIN_ABS_DEV)
+    return _regions_from_flags(page_number, grid, flagged, "jpeg_ghost")
 
 
 def _noise_outlier_mask(scores: np.ndarray) -> np.ndarray:

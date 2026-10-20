@@ -26,7 +26,7 @@ export function useResult(jobId: string | undefined): UseResultState {
 
   useEffect(() => {
     if (!jobId) return;
-    if (current && currentJobId === jobId) {
+    if (tick === 0 && current && currentJobId === jobId) {
       setResult(current);
       return;
     }

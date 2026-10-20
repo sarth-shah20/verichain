@@ -79,7 +79,10 @@ def _fetch_land(cur: sqlite3.Cursor, values: dict[str, Any]) -> dict | None:
     owner overlap instead of an exact key string.
     """
     parcel = _norm(values.get("parcel_id")).replace(" ", "")
-    survey_bases = _survey_bases(values.get("survey_number"))
+    def surveys(value: Any) -> set[str]:
+        return {re.sub(r"\s+", "", t) for t in re.split(r"[,;]", _norm(value)) if t.strip()}
+
+    survey_numbers = surveys(values.get("survey_number"))
 
     # 1. Exact parcel/Bhoomi/ULPIN id is the strongest signal (ignore spacing).
     if parcel:
@@ -91,30 +94,20 @@ def _fetch_land(cur: sqlite3.Cursor, values: dict[str, Any]) -> dict | None:
         if row:
             return dict(row)
 
-    if not survey_bases:
+    locality_fields = ("state", "district", "taluka", "village")
+    if not survey_numbers or not all(_norm(values.get(k)) for k in locality_fields):
         return None
 
     # 2. Candidates sharing a base survey number, disambiguated by locality/owner.
     cur.execute("SELECT * FROM land_records")
     candidates = [
         r for r in (dict(x) for x in cur.fetchall())
-        if _survey_bases(r.get("survey_number")) & survey_bases
+        if surveys(r.get("survey_number")) == survey_numbers
+        and all(_norm(r.get(k)) == _norm(values.get(k)) for k in locality_fields)
     ]
     if not candidates:
         return None
-    if len(candidates) == 1:
-        return candidates[0]
-
-    def overlap(rec: dict) -> int:
-        score = 0
-        for field in ("village", "taluka", "district", "state", "owner_name"):
-            tgt, got = _norm(values.get(field)), _norm(rec.get(field))
-            if tgt and got and (tgt in got or got in tgt):
-                score += 1
-        return score
-
-    best = max(candidates, key=overlap)
-    return best if overlap(best) > 0 else candidates[0]
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def _backend_fetch(collection: str, key: str, values: dict[str, Any]) -> dict | None:
@@ -167,12 +160,14 @@ def fetch_record(
     if not isinstance(extracted_fields, dict):
         extracted_fields = {}
     key = _make_lookup_key(key_fields, extracted_fields)
-    record = _backend_fetch(db_collection, key, extracted_fields)
+    from demo_records import reference
+    demo = reference(db_collection, extracted_fields)
+    record = demo or _backend_fetch(db_collection, key, extracted_fields)
     if record is None:
         return {"found": False, "source": None, "record": {}, "as_of": None}
     return {
         "found": True,
-        "source": db_collection,
+        "source": "synthetic_demo_reference" if demo else db_collection,
         "record": record,
         "as_of": record.get("as_of"),
     }

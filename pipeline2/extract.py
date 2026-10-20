@@ -37,6 +37,8 @@ In ONE pass over the supplied document image(s)/PDF:
 3. RETURN the COMPLETE content as a single English string in "full_text". Do NOT
    summarise, omit rows, or drop sections — preserve the whole document,
    including every owner/khatedar name and every table line, in reading order.
+   Mark page boundaries as [Page 1], [Page 2], etc. Preserve every bank debit,
+   credit, running balance and transaction date, including blank opposite columns.
 4. CLASSIFY the document type.
 
 Rules:
@@ -176,14 +178,13 @@ def extract_document(path: str, doc_type: str | None = None) -> dict[str, Any]:
     Returns a dict with doc_type, language, full_text, fields, and the schema
     used (for downstream DB lookup + verification).
     """
-    media = utils.load_media(path)
-
     # Pass 1 — full content + classification (no length cap; preserve everything).
-    fulltext = _coerce_fulltext(
-        llm_client.call_vision(
-            _FULLTEXT_SYSTEM, _build_fulltext_prompt(doc_type), media, json_mode=True
+    with utils.document_media(path) as media:
+        fulltext = _coerce_fulltext(
+            llm_client.call_vision(
+                _FULLTEXT_SYSTEM, _build_fulltext_prompt(doc_type), media, json_mode=True
+            )
         )
-    )
     detected = fulltext.get("doc_type")
     resolved_type = (
         detected if (doc_type is None and detected in schemas.SCHEMAS and detected != "unknown")
@@ -215,6 +216,10 @@ def extract_document(path: str, doc_type: str | None = None) -> dict[str, Any]:
         "normalization_notes": [],
         "extraction_observations": [],
     }
+    bank_warnings = []
+    if result["doc_type"] == "bank_statement":
+        from bank_reconciliation import normalize_statement
+        result["fields"], bank_warnings = normalize_statement(result["fields"])
     result["_schema"] = {
         "doc_type": result["doc_type"],
         "db_collection": schema["db_collection"],
@@ -222,6 +227,14 @@ def extract_document(path: str, doc_type: str | None = None) -> dict[str, Any]:
         "label": schema["label"],
     }
     result["_source_path"] = path
+    required = schema.get("key_fields", [])
+    warnings = list(bank_warnings)
+    if not full_text.strip():
+        warnings.append("No readable document text was recovered.")
+    missing = [k for k in required if result["fields"].get(k) in (None, "")]
+    if missing:
+        warnings.append("Missing lookup fields: " + ", ".join(missing))
+    result["analysis_warnings"] = warnings
     result["_extracted_at"] = utils.now_iso()
     return result
 

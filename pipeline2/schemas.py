@@ -96,6 +96,7 @@ SCHEMAS: dict[str, dict[str, Any]] = {
         "key_fields": ["employee_id", "pay_period"],
         "fields": {
             "employee_name": "employee name",
+            "pan": "employee PAN if printed; null if absent",
             "employee_id": "employee id / code",
             "employer_name": "employer name",
             "pay_period": "month/year of the slip",
@@ -153,12 +154,18 @@ SCHEMAS: dict[str, dict[str, Any]] = {
         "key_fields": ["account_last4", "statement_period"],
         "fields": {
             "account_holder": "account holder name",
+            "pan": "account holder PAN if printed; null if absent",
             "account_last4": "account number last 4 digits",
             "bank_name": "bank name",
             "statement_period": "statement period",
+            "statement_start": "first covered date, YYYY-MM-DD",
+            "statement_end": "last covered date, YYYY-MM-DD",
+            "currency": "printed currency code; INR for rupees",
             "opening_balance": "opening balance (number)",
             "closing_balance": "closing balance (number)",
             "salary_credits": "list of salary credit amounts if identifiable",
+            "transactions": "ALL transaction rows in printed order as a list of objects: {date: YYYY-MM-DD or null, description: full narration, debit: number or null, credit: number or null, balance: number or null, page: 1-based source page}. Leave an unreadable number null. Include every row; do not summarize.",
+            "transactions_complete": "boolean: true ONLY if every printed transaction row was captured completely; false for gaps/unreadable rows",
         },
         "forgery_hints": [
             "Running balance does not reconcile with transactions",

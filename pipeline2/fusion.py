@@ -21,6 +21,24 @@ from typing import Any
 
 import llm_client
 import utils
+from pydantic import BaseModel, Field, StrictInt
+from typing import Literal
+
+
+class FusionFlag(BaseModel):
+    source: str
+    evidence: str
+    weight: Literal["low", "medium", "high"]
+
+
+class FusionResult(BaseModel):
+    overall_risk_score: StrictInt = Field(ge=0, le=100)
+    risk_band: Literal["low", "medium", "high"]
+    decision_recommendation: Literal["approve", "manual_review", "decline"]
+    top_flags: list[FusionFlag] = Field(default_factory=list)
+    corroborated_findings: list[str] = Field(default_factory=list)
+    false_flag_adjustments: list[str] = Field(default_factory=list)
+    rationale: str
 
 _FUSION_SYSTEM = """You are the senior risk-fusion engine for a bank's loan
 underwriting.
@@ -55,13 +73,19 @@ Scoring guidance (0 = clean, 100 = almost certainly fraudulent):
   identifier checks AND arithmetic-reconciliation checks. A failed PAN structure/
   holder-type check, a failed Aadhaar Verhoeff checksum, a failed GSTIN checksum/
   state-code check, a GSTIN whose embedded PAN is not the applicant's PAN, or a
-  payslip whose gross pay minus deductions does not equal its stated net pay,
-  means the value is fabricated/edited — treat these as HIGH weight and raise the
-  score sharply even without a pixel signal, and EVEN WHEN the document has no
-  DB-of-record match (a payslip has no issuer database by design; the arithmetic
-  check IS its verification). (These arrive in the verification report's
-  "deterministic_checks" and as discrepancies tagged with the check name in
-  brackets.)
+  failed payslip arithmetic check (gross - deductions != net pay), where the
+  value is fabricated/edited -> HIGH risk, no re-weighting downward allowed.
+  Treat these as HIGH weight and raise the score sharply even without a pixel
+  signal, and EVEN WHEN the document has no DB-of-record match (a payslip has
+  no issuer database by design; the arithmetic check IS its verification).
+  (These arrive in the verification report's "deterministic_checks" and as
+  discrepancies tagged with the check name in brackets.)
+- A cross-document discrepancy is HARD evidence too, even when every document
+  individually verifies ("unverified" counts as individual status). Income
+  understatement across documents (payslip annualized vs ITR, >15% gap) or
+  identity/PAN conflict must push the overall score HIGH regardless of how
+  clean each single document looked. Never return LOW risk when a HIGH-severity
+  cross-document flag exists; align per-document flags you cite with them.
 - FIELD-WEIGHTED risk: weight WHICH field was edited/mismatched, mirroring how a
   human underwriter reads fraud. In descending order of severity:
     1. Identity & money fields — name, PAN, Aadhaar, account number, GSTIN,
@@ -191,15 +215,8 @@ def _fallback_fusion(
     match_status (mirrors the mock-fusion convention: 0 = clean, 100 = fraud).
     """
     ms = _worst_match_status(verification)
-    if ms == "match":
-        risk, band, rec = 10, "low", "approve"
-        evidence = "All checked fields match the authoritative DB record."
-    elif ms == "mismatch":
-        risk, band, rec = 82, "high", "decline"
-        evidence = "Critical field mismatch vs the authoritative DB record."
-    else:  # unverified / partial_match
-        risk, band, rec = 35, "medium", "manual_review"
-        evidence = "Document could not be fully verified against an authoritative record."
+    risk, band, rec = 30, "medium", "manual_review"
+    evidence = "Risk fusion could not complete. Review the retained document evidence."
     return {
         "overall_risk_score": risk,
         "risk_band": band,
@@ -208,8 +225,8 @@ def _fallback_fusion(
         "corroborated_findings": [],
         "false_flag_adjustments": [],
         "rationale": (
-            "Fusion LLM output could not be parsed; verdict derived from the "
-            f"content verification match_status ({ms})."
+            "Risk fusion is incomplete; human review is required unless retained "
+            f"hard evidence independently supports rejection. Content status: {ms}."
         ),
         "fallback": True,
     }
@@ -234,11 +251,12 @@ def fuse_reports(
         out_path: optional path to write the holistic JSON.
     """
     try:
-        fusion = llm_client.call_text(
+        payload = llm_client.call_text(
             _FUSION_SYSTEM,
             _build_user_prompt(verification, forensics, cross_doc, flag_history),
             json_mode=True,
         )
+        fusion = FusionResult.model_validate(payload).model_dump()
     except Exception:
         # A malformed/truncated LLM response must not sink a document whose
         # content verification already succeeded — degrade to a heuristic verdict.
